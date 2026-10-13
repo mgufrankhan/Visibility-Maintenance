@@ -1,0 +1,41 @@
+{
+  "name": "visibility-maintenance",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "tests"
+  ],
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json && tsc -p apps/maintenance-web/tsconfig.json",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "db:migrate": "tsx tools/migrate.ts",
+    "setup": "tsx tools/setup.ts",
+    "license": "tsx tools/license-cli.ts",
+    "backup": "tsx tools/backup.ts",
+    "smoke:bundles": "node tools/build.mjs && tools/smoke-bundles.sh",
+    "dev:platform": "tsx watch apps/platform-api/src/main.ts",
+    "dev:api": "tsx watch apps/maintenance-api/src/main.ts",
+    "dev:worker": "tsx watch apps/maintenance-worker/src/main.ts",
+    "dev:web": "npm run dev -w @vm/maintenance-web",
+    "build": "node tools/build.mjs && npm run build -w @vm/maintenance-web",
+    "openapi": "tsx tools/generate-openapi.ts",
+    "release:bundle": "tools/sign-release.sh"
+  },
+  "devDependencies": {
+    "@types/luxon": "^3.7.6",
+    "@types/node": "26.6.5",
+    "@types/pg": "^8.23.1",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vitest": "5.0.4"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "@vm/ops",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@vm/contracts": "0.1.0",
+    "@vm/core": "0.1.0",
+    "@vm/db": "0.1.0",
+    "@vm/licensing": "0.1.0",
+    "@vm/maintenance-api": "0.1.0",
+    "@vm/platform-api": "0.1.0",
+    "@vm/registry": "0.1.0",
+    "pg": "8.23.1"
+  }
+}

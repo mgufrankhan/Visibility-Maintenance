@@ -1,0 +1,23 @@
+{
+  "name": "@vm/maintenance-api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@vm/contracts": "0.1.0",
+    "@vm/core": "0.1.0",
+    "@vm/db": "0.1.0",
+    "@vm/policy": "0.1.0",
+    "@vm/licensing": "0.1.0",
+    "@vm/registry": "0.1.0",
+    "@vm/connectors": "0.1.0",
+    "@vm/neo": "0.1.0",
+    "fastify": "5.12.5",
+    "jose": "6.2.12",
+    "pg": "8.23.1",
+    "@vm/server-kit": "0.1.0"
+  }
+}

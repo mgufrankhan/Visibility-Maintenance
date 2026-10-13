@@ -1,0 +1,11 @@
+.git
+**/node_modules
+dist
+var
+coverage
+tests/.tmp
+deploy/private/data
+deploy/private/secrets
+deploy/private/.env
+**/*.log
+.DS_Store

@@ -1,0 +1,9 @@
+{
+  "name": "Visibility Maintenance",
+  "short_name": "Maintenance",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f7fb",
+  "theme_color": "#0b3d91",
+  "description": "Standalone maintenance and asset management"
+}

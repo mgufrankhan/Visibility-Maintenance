@@ -1,0 +1,11 @@
+# Optional overlay: enable the in-process deterministic Neo runtime.
+# There is no separate model process and no GPU requirement.
+#
+#   docker compose -f compose.yaml -f compose.neo.yaml up -d
+#
+# Cloud inference stays off. A qualified local or cloud model is not shipped.
+
+services:
+  maintenance-api:
+    environment:
+      NEO_INFERENCE_POLICY: private_only

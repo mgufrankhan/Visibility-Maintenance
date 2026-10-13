@@ -1,0 +1,51 @@
+export const PERMISSIONS = [
+  'maintenance.view',
+  'maintenance.request.create',
+  'maintenance.request.view_own',
+  'maintenance.request.triage',
+  'maintenance.work_order.create',
+  'maintenance.work_order.edit',
+  'maintenance.work_order.assign',
+  'maintenance.work_order.execute',
+  'maintenance.work_order.complete',
+  'maintenance.work_order.approve',
+  'maintenance.work_order.cancel',
+  'maintenance.procedure.manage',
+  'maintenance.plan.manage',
+  'maintenance.inspection.execute',
+  'maintenance.inspection.manage',
+  'maintenance.downtime.create',
+  'maintenance.downtime.correct',
+  'maintenance.report.view',
+  'maintenance.cost.view',
+  'maintenance.export',
+  'maintenance.profile.manage',
+  'maintenance.settings.manage',
+  'maintenance.access.manage',
+  'maintenance.license.manage',
+  'maintenance.automation.manage',
+  'maintenance.integration.manage',
+  'maintenance.event.ingest',
+  'maintenance.recommendation.decide',
+  'maintenance.neo.use',
+  'maintenance.neo.draft',
+] as const;
+export type Permission = (typeof PERMISSIONS)[number];
+
+export const MAINTENANCE_ROLES = [
+  'reporter',
+  'technician',
+  'supervisor',
+  'maintenance_manager',
+  'asset_administrator',
+  'viewer',
+  'cost_viewer',
+  'maintenance_admin',
+  'stores_user',
+  'connector_service',
+  'neo_service',
+] as const;
+export type MaintenanceRole = (typeof MAINTENANCE_ROLES)[number];
+
+/** Roles counted as operational users for licensing (PRD §21). */
+export const OPERATIONAL_ROLES: readonly MaintenanceRole[] = ['technician', 'supervisor', 'maintenance_manager'];

@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+coverage/
+.env
+.env.*
+!.env.example
+/var/
+/deploy/private/data/
+/deploy/private/secrets/
+/deploy/private/config/
+/tests/.tmp/

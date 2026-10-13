@@ -1,0 +1,81 @@
+{
+  "product": "Visibility Maintenance",
+  "version": "1.0",
+  "files": [
+    {
+      "file": "CODEX_START_PROMPT.md",
+      "bytes": 3877,
+      "words": 517
+    },
+    {
+      "file": "README.md",
+      "bytes": 3067,
+      "words": 389
+    },
+    {
+      "file": "docs/00_PRODUCT_PRD.md",
+      "bytes": 60641,
+      "words": 8598
+    },
+    {
+      "file": "docs/01_SYSTEM_ARCHITECTURE.md",
+      "bytes": 3820,
+      "words": 567
+    },
+    {
+      "file": "docs/02_DATA_MODEL.md",
+      "bytes": 5536,
+      "words": 751
+    },
+    {
+      "file": "docs/03_API_CONTRACTS.md",
+      "bytes": 5149,
+      "words": 663
+    },
+    {
+      "file": "docs/04_PERMISSIONS_AND_LICENSING.md",
+      "bytes": 3980,
+      "words": 561
+    },
+    {
+      "file": "docs/05_UI_AND_USER_FLOWS.md",
+      "bytes": 4059,
+      "words": 584
+    },
+    {
+      "file": "docs/06_IOT_CONNECTORS.md",
+      "bytes": 4136,
+      "words": 545
+    },
+    {
+      "file": "docs/07_NEO_AGENT_SPEC.md",
+      "bytes": 3488,
+      "words": 467
+    },
+    {
+      "file": "docs/08_DEPLOYMENT_AND_OPERATIONS.md",
+      "bytes": 3731,
+      "words": 485
+    },
+    {
+      "file": "docs/09_TEST_AND_ACCEPTANCE_PLAN.md",
+      "bytes": 3763,
+      "words": 555
+    },
+    {
+      "file": "docs/10_IMPLEMENTATION_BACKLOG.md",
+      "bytes": 3159,
+      "words": 443
+    },
+    {
+      "file": "docs/11_REPOSITORY_AND_ENGINEERING_GUIDE.md",
+      "bytes": 3343,
+      "words": 468
+    },
+    {
+      "file": "docs/12_DECISIONS_AND_DISCOVERY.md",
+      "bytes": 3407,
+      "words": 498
+    }
+  ]
+}

@@ -1,0 +1,162 @@
+# Visibility Maintenance - private standalone package (docs/08).
+#
+# Core runs with Live, OpenRemote, Neo and connectors absent and needs no GPU.
+# Optional Neo overlay: docker compose -f compose.yaml -f compose.neo.yaml up -d
+# Optional profiles never gate core readiness.
+#
+#   ./init-secrets.sh                 # once: generates ./secrets/*
+#   cp .env.example .env && edit      # PUBLIC_URL etc.
+#   docker compose build
+#   docker compose up -d              # migrate runs first, then services
+#   docker compose run --rm tools tools/setup.mjs --tenant-slug ... (see README)
+#
+# Persistent state lives in named volumes (database, attachments, identity key,
+# system credentials, backups); containers are disposable.
+
+name: visibility-maintenance
+
+x-server: &server
+  image: ${VM_SERVER_IMAGE:-visibility-maintenance/server:0.1.0}
+  build:
+    context: ../..
+    target: server
+  restart: unless-stopped
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  secrets: [database_url, download_link_secret]
+  logging:
+    driver: json-file
+    options: { max-size: 20m, max-file: "5" }
+
+x-server-env: &server-env
+  PLATFORM_DATABASE_URL_FILE: /run/secrets/database_url
+  MAINTENANCE_DATABASE_URL_FILE: /run/secrets/database_url
+  DOWNLOAD_LINK_SECRET_FILE: /run/secrets/download_link_secret
+  PLATFORM_URL: http://platform-api:4100
+  TOKEN_ISSUER: ${PUBLIC_URL:?set PUBLIC_URL in .env}
+  BLOB_ROOT: /var/lib/vm/blobs
+  SYSTEM_CREDENTIALS_FILE: /var/lib/vm/config/system-credentials.json
+  LICENSE_PUBLIC_KEYS_FILE: /etc/vm/license-public-keys.json
+  PLATFORM_SIGNING_KEY_FILE: /var/lib/vm/identity/signing-key.json
+
+services:
+  postgres:
+    image: ${VM_POSTGRES_IMAGE:-postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: visibility
+      POSTGRES_USER: vm
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vm -d visibility"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    shm_size: 256m
+
+  # Runs before the platform API starts, so it checks the registry binding
+  # against the platform database; run `tools tools/migrate.mjs --check`
+  # against the running platform before an upgrade (README, Upgrade).
+  migrate:
+    <<: *server
+    restart: "no"
+    command: ["tools/migrate.mjs"]
+    environment:
+      <<: *server-env
+      PLATFORM_URL: ""
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  platform-api:
+    <<: *server
+    command: ["platform-api/main.mjs"]
+    environment:
+      <<: *server-env
+      PORT: "4100"
+      PLATFORM_ISSUER: ${PUBLIC_URL:?set PUBLIC_URL in .env}
+    volumes: [identity:/var/lib/vm/identity]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    healthcheck: &http-health
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+process.env.PORT+'/health/ready').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  maintenance-api:
+    <<: *server
+    command: ["maintenance-api/main.mjs"]
+    secrets: [database_url, download_link_secret, monitoring_token]
+    environment:
+      <<: *server-env
+      PORT: "4200"
+      MONITORING_TOKEN_FILE: /run/secrets/monitoring_token
+      NEO_INFERENCE_POLICY: ${NEO_INFERENCE_POLICY:-disabled}
+      ALLOW_SIMULATED_CONNECTORS: ${ALLOW_SIMULATED_CONNECTORS:-false}
+    volumes:
+      - blobs:/var/lib/vm/blobs
+      - config:/var/lib/vm/config:ro
+      - ${LICENSE_PUBLIC_KEYS_PATH:-./config/license-public-keys.json}:/etc/vm/license-public-keys.json:ro
+    depends_on:
+      platform-api: { condition: service_healthy }
+    healthcheck: *http-health
+
+  maintenance-worker:
+    <<: *server
+    command: ["maintenance-worker/main.mjs"]
+    environment:
+      <<: *server-env
+      WORKER_ID: worker-1
+    volumes:
+      - blobs:/var/lib/vm/blobs
+      - config:/var/lib/vm/config:ro
+      - ${LICENSE_PUBLIC_KEYS_PATH:-./config/license-public-keys.json}:/etc/vm/license-public-keys.json:ro
+    depends_on:
+      platform-api: { condition: service_healthy }
+
+  web:
+    image: ${VM_WEB_IMAGE:-visibility-maintenance/web:0.1.0}
+    build:
+      context: ../..
+      target: web
+    restart: unless-stopped
+    environment:
+      MAINTENANCE_UPSTREAM: maintenance-api:4200
+      PLATFORM_UPSTREAM: platform-api:4100
+    ports: ["${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8080}:8080"]
+    depends_on:
+      maintenance-api: { condition: service_healthy }
+
+  # Operator tools: setup, backup/restore, preflight, license verification.
+  #   docker compose run --rm tools tools/backup.mjs create --out-dir /var/lib/vm/backups
+  tools:
+    <<: *server
+    profiles: [tools]
+    restart: "no"
+    command: ["tools/migrate.mjs", "--check"]
+    environment:
+      <<: *server-env
+      PG_BIN_DIR: /usr/bin
+    volumes:
+      - blobs:/var/lib/vm/blobs
+      - config:/var/lib/vm/config
+      - identity:/var/lib/vm/identity
+      - backups:/var/lib/vm/backups
+      - ${LICENSE_PUBLIC_KEYS_PATH:-./config/license-public-keys.json}:/etc/vm/license-public-keys.json:ro
+
+secrets:
+  postgres_password: { file: ./secrets/postgres_password }
+  database_url: { file: ./secrets/database_url }
+  download_link_secret: { file: ./secrets/download_link_secret }
+  monitoring_token: { file: ./secrets/monitoring_token }
+
+volumes:
+  pgdata:
+  blobs:
+  identity:
+  config:
+  backups:

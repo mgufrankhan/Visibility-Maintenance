@@ -1,0 +1,203 @@
+import { useState, type FormEvent } from 'react';
+import { M, api } from '../api.ts';
+import { Badge, ErrorBox, emptyRow, useList } from '../ui.tsx';
+
+export function Overview({ siteId }: { siteId: string }) {
+  const work = useList<any>(`${M}/work-orders?site_id=${siteId}&limit=50`);
+  const reqs = useList<any>(`${M}/requests?site_id=${siteId}&limit=50`);
+  const plans = useList<any>(`${M}/plans?site_id=${siteId}&status=active`);
+  const overdue = work.items.filter((w) => w.overdue);
+  const openReqs = reqs.items.filter((r) => r.state === 'submitted' || r.state === 'under_review');
+  return (
+    <>
+      <h2>Overview</h2>
+      <div className="row">
+        <a className="card" href="#/work"><strong>{overdue.length}</strong><div className="muted">Overdue work</div></a>
+        <a className="card" href="#/requests"><strong>{openReqs.length}</strong><div className="muted">Open requests</div></a>
+        <a className="card" href="#/work"><strong>{work.items.filter((w) => w.state === 'ready').length}</strong><div className="muted">Ready orders</div></a>
+        <a className="card" href="#/pm"><strong>{plans.items.length}</strong><div className="muted">Active PM plans</div></a>
+      </div>
+      <ErrorBox err={work.err ?? reqs.err ?? plans.err} />
+      <p className="muted">When no IoT is configured, report faults and plan calendar PM from Requests and Preventive Maintenance. Neo and connectors are optional.</p>
+    </>
+  );
+}
+
+export function Downtime({ siteId }: { siteId: string }) {
+  const list = useList<any>(`${M}/downtime-events?site_id=${siteId}`);
+  const assets = useList<any>(`${M}/asset-profiles?site_id=${siteId}&limit=100`);
+  const [assetId, setAssetId] = useState('');
+  const [err, setErr] = useState<unknown>(null);
+  const create = async (e: FormEvent) => {
+    e.preventDefault();
+    setErr(null);
+    try {
+      await api(`${M}/downtime-events`, {
+        method: 'POST',
+        body: JSON.stringify({
+          asset_id: assetId,
+          classification: 'candidate',
+          started_at: new Date().toISOString(),
+        }),
+      });
+      list.reload();
+    } catch (e) {
+      setErr(e);
+    }
+  };
+  return (
+    <>
+      <h2>Downtime</h2>
+      <form className="card" onSubmit={(e) => void create(e)}>
+        <label>Asset
+          <select value={assetId} onChange={(e) => setAssetId(e.target.value)} required>
+            <option value="">—</option>
+            {assets.items.map((a) => <option key={a.asset?.id} value={a.asset?.id}>{a.asset?.code}</option>)}
+          </select>
+        </label>
+        <button type="submit">Open candidate downtime</button>
+        <ErrorBox err={err} />
+      </form>
+      <ErrorBox err={list.err} />
+      <table>
+        <thead><tr><th>Asset</th><th>Classification</th><th>Started</th><th>Restored</th></tr></thead>
+        <tbody>
+          {list.items.map((d) => (
+            <tr key={d.id}><td>{d.asset_id}</td><td>{d.classification}</td><td>{d.started_at}</td><td>{d.restored_at ?? 'open'}</td></tr>
+          ))}
+          {!list.items.length && emptyRow(4, list.loading)}
+        </tbody>
+      </table>
+    </>
+  );
+}
+
+export function Reports({ siteId }: { siteId: string }) {
+  const [metric, setMetric] = useState('failure_count');
+  const [data, setData] = useState<any>(null);
+  const [err, setErr] = useState<unknown>(null);
+  const run = async () => {
+    setErr(null);
+    const to = new Date();
+    const from = new Date(to.getTime() - 90 * 86400000);
+    try {
+      setData(await api(`${M}/reports/${metric}?site_id=${siteId}&from=${from.toISOString()}&to=${to.toISOString()}`));
+    } catch (e) {
+      setErr(e);
+    }
+  };
+  return (
+    <>
+      <h2>Reports</h2>
+      <div className="row">
+        <label>Metric
+          <select value={metric} onChange={(e) => setMetric(e.target.value)}>
+            {['failure_count', 'mtbf', 'mttr', 'downtime', 'overdue_backlog', 'pm_compliance', 'repeat_faults', 'maintenance_cost'].map((m) => <option key={m}>{m}</option>)}
+          </select>
+        </label>
+        <button type="button" onClick={() => void run()}>Run</button>
+        <a className="secondary" style={{ padding: '0.45rem 0.8rem', borderRadius: 6, background: '#e8eef8', textDecoration: 'none' }} href={`${M}/exports/work_orders.csv?site_id=${siteId}&from=${new Date(Date.now() - 90 * 86400000).toISOString()}&to=${new Date().toISOString()}`}>Export work orders CSV</a>
+      </div>
+      <ErrorBox err={err} />
+      {data && (
+        <div className="card">
+          {data.coverage_notes && <p className="muted">{Array.isArray(data.coverage_notes) ? data.coverage_notes.join(' ') : String(data.coverage_notes)}</p>}
+          <pre>{JSON.stringify(data, null, 2)}</pre>
+        </div>
+      )}
+    </>
+  );
+}
+
+export function Neo({ siteId }: { siteId: string }) {
+  const recs = useList<any>(`${M}/recommendations?site_id=${siteId}`);
+  const assets = useList<any>(`${M}/asset-profiles?site_id=${siteId}`);
+  const [query, setQuery] = useState('');
+  const [assetId, setAssetId] = useState('');
+  const [draftKind, setDraftKind] = useState<'none' | 'draft_request' | 'draft_work_order' | 'propose_checklist'>('none');
+  const [answer, setAnswer] = useState<any>(null);
+  const [err, setErr] = useState<unknown>(null);
+  const ask = async (e: FormEvent) => {
+    e.preventDefault();
+    setErr(null);
+    try {
+      setAnswer(await api(`${M}/neo/ask`, {
+        method: 'POST',
+        body: JSON.stringify({
+          site_id: siteId,
+          asset_id: assetId || null,
+          query,
+          draft_request: draftKind === 'draft_request',
+          draft_work_order: draftKind === 'draft_work_order',
+          propose_checklist: draftKind === 'propose_checklist',
+        }),
+      }));
+      recs.reload();
+    } catch (e) {
+      setErr(e);
+    }
+  };
+  const decide = async (id: string, actionVersion: number, decision: 'approve' | 'reject') => {
+    setErr(null);
+    try {
+      await api(`${M}/recommendations/${id}/decisions`, {
+        method: 'POST',
+        body: JSON.stringify({ decision, reason: `${decision} recommendation from web`, action_version: actionVersion }),
+      });
+      recs.reload();
+    } catch (e) {
+      setErr(e);
+    }
+  };
+  return (
+    <>
+      <h2>Neo</h2>
+      <p className="muted">Optional assistant. Answers are retrieval-only until a qualified model exists. The proposer cannot approve their own draft. Work forms stay usable if Neo is unavailable.</p>
+      <form className="card" onSubmit={(e) => void ask(e)}>
+        <label>Asset
+          <select value={assetId} onChange={(e) => setAssetId(e.target.value)}>
+            <option value="">—</option>
+            {assets.items.map((a) => <option key={a.asset?.id} value={a.asset?.id}>{a.asset?.code}</option>)}
+          </select>
+        </label>
+        <label>Question<textarea value={query} onChange={(e) => setQuery(e.target.value)} required /></label>
+        <label>Review-only draft
+          <select value={draftKind} onChange={(e) => setDraftKind(e.target.value as typeof draftKind)}>
+            <option value="none">Answer only</option>
+            <option value="draft_request">Draft request</option>
+            <option value="draft_work_order">Draft work order</option>
+            <option value="propose_checklist">Propose checklist (never publishes)</option>
+          </select>
+        </label>
+        <button type="submit">Ask</button>
+        <ErrorBox err={err} />
+      </form>
+      {answer && (
+        <div className="card">
+          <p><strong>Observations.</strong> {answer.observations}</p>
+          <p><strong>Possible causes.</strong> {(answer.possible_causes ?? []).join(' ') || '—'}</p>
+          <p><strong>Checks.</strong> {(answer.recommended_checks ?? []).join(' ')}</p>
+          <p className="muted">Runtime {answer.runtime}; model {answer.model_version ?? 'none'}; policy {answer.inference_policy}.</p>
+          <ul>{(answer.citations ?? []).map((c: any) => (
+            <li key={`${c.kind}-${c.id}`}>{c.kind} {c.title}{c.freshness ? ` · ${c.freshness}` : ''}{c.untrusted ? ' (untrusted document)' : ''}</li>
+          ))}</ul>
+          {(answer.missing_evidence ?? []).length > 0 && <p className="muted">Missing: {answer.missing_evidence.join(' ')}</p>}
+        </div>
+      )}
+      <h3>Recommendations</h3>
+      {recs.items.map((r) => (
+        <div key={r.id} className="card">
+          <Badge state={r.status} /> {r.action_type} v{r.action_version}
+          <pre className="muted">{JSON.stringify(r.action_payload, null, 2)}</pre>
+          {r.status === 'pending' && (
+            <div className="row">
+              <button type="button" onClick={() => void decide(r.id, r.action_version, 'approve')}>Approve exact action</button>
+              <button type="button" className="secondary" onClick={() => void decide(r.id, r.action_version, 'reject')}>Reject</button>
+            </div>
+          )}
+        </div>
+      ))}
+      {!recs.items.length && !recs.loading && <p className="muted">No recommendations.</p>}
+    </>
+  );
+}

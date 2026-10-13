@@ -1,0 +1,8 @@
+{
+  "name": "@vm/maintenance-worker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "@vm/core": "0.1.0", "@vm/db": "0.1.0", "@vm/registry": "0.1.0", "@vm/server-kit": "0.1.0", "pg": "8.23.1" }
+}
