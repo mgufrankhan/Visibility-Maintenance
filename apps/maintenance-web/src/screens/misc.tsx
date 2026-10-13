@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { M, api } from '../api.ts';
-import { Badge, ErrorBox, emptyRow, useList } from '../ui.tsx';
+import { Badge, ErrorBox, Notice, PageHeader, Table, emptyRow, useList } from '../ui.tsx';
 
 export function Overview({ siteId }: { siteId: string }) {
   const work = useList<any>(`${M}/work-orders?site_id=${siteId}&limit=50`);
@@ -8,17 +8,72 @@ export function Overview({ siteId }: { siteId: string }) {
   const plans = useList<any>(`${M}/plans?site_id=${siteId}&status=active`);
   const overdue = work.items.filter((w) => w.overdue);
   const openReqs = reqs.items.filter((r) => r.state === 'submitted' || r.state === 'under_review');
+  const ready = work.items.filter((w) => w.state === 'ready');
+  const recentWork = work.items.slice(0, 5);
+  const recentReqs = openReqs.slice(0, 5);
   return (
     <>
-      <h2>Overview</h2>
-      <div className="row">
-        <a className="card" href="#/work"><strong>{overdue.length}</strong><div className="muted">Overdue work</div></a>
-        <a className="card" href="#/requests"><strong>{openReqs.length}</strong><div className="muted">Open requests</div></a>
-        <a className="card" href="#/work"><strong>{work.items.filter((w) => w.state === 'ready').length}</strong><div className="muted">Ready orders</div></a>
-        <a className="card" href="#/pm"><strong>{plans.items.length}</strong><div className="muted">Active PM plans</div></a>
+      <PageHeader
+        title="Overview"
+        lede="Site workload at a glance. Report faults and run calendar PM without Live, OpenRemote, or Neo."
+        actions={
+          <>
+            <a className="secondary" style={{ padding: '0.5rem 0.9rem', borderRadius: 7, textDecoration: 'none', fontWeight: 600 }} href="#/requests">Report fault</a>
+            <a className="secondary" style={{ padding: '0.5rem 0.9rem', borderRadius: 7, textDecoration: 'none', fontWeight: 600 }} href="#/my-work">My Work</a>
+          </>
+        }
+      />
+      <div className="stat-grid">
+        <a className={`stat-card ${overdue.length ? 'warn' : ''}`} href="#/work">
+          <span className="stat-value">{work.loading ? '…' : overdue.length}</span>
+          <div className="stat-label">Overdue work</div>
+        </a>
+        <a className="stat-card" href="#/requests">
+          <span className="stat-value">{reqs.loading ? '…' : openReqs.length}</span>
+          <div className="stat-label">Open requests</div>
+        </a>
+        <a className={`stat-card ${ready.length ? 'ok' : ''}`} href="#/work">
+          <span className="stat-value">{work.loading ? '…' : ready.length}</span>
+          <div className="stat-label">Ready orders</div>
+        </a>
+        <a className="stat-card" href="#/pm">
+          <span className="stat-value">{plans.loading ? '…' : plans.items.length}</span>
+          <div className="stat-label">Active PM plans</div>
+        </a>
       </div>
       <ErrorBox err={work.err ?? reqs.err ?? plans.err} />
-      <p className="muted">When no IoT is configured, report faults and plan calendar PM from Requests and Preventive Maintenance. Neo and connectors are optional.</p>
+      <div className="split-2">
+        <div className="card">
+          <h3 style={{ marginTop: 0 }}>Open requests</h3>
+          {recentReqs.length === 0 && !reqs.loading && <p className="muted">No open requests.</p>}
+          <ul className="list-recent">
+            {recentReqs.map((r) => (
+              <li key={r.id}>
+                <a className="title" href="#/requests">#{r.display_number} · {r.description}</a>
+                <Badge state={r.state} />
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="card">
+          <h3 style={{ marginTop: 0 }}>Recent work orders</h3>
+          {recentWork.length === 0 && !work.loading && <p className="muted">No work orders yet.</p>}
+          <ul className="list-recent">
+            {recentWork.map((w) => (
+              <li key={w.id}>
+                <a className="title" href="#/work">WO-{w.display_number} · {w.title}</a>
+                <span className="row" style={{ gap: '0.35rem' }}>
+                  {w.overdue && <span className="badge warn">overdue</span>}
+                  <Badge state={w.state} />
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+      <Notice tone="info">
+        Connectors and Neo are optional. Manual fault reporting, planning, and completion stay available when telemetry or AI are offline.
+      </Notice>
     </>
   );
 }
@@ -47,27 +102,29 @@ export function Downtime({ siteId }: { siteId: string }) {
   };
   return (
     <>
-      <h2>Downtime</h2>
+      <PageHeader title="Downtime" lede="Record candidate downtime against maintainable assets. Labor time and equipment downtime stay separate." />
       <form className="card" onSubmit={(e) => void create(e)}>
-        <label>Asset
-          <select value={assetId} onChange={(e) => setAssetId(e.target.value)} required>
-            <option value="">—</option>
-            {assets.items.map((a) => <option key={a.asset?.id} value={a.asset?.id}>{a.asset?.code}</option>)}
-          </select>
-        </label>
-        <button type="submit">Open candidate downtime</button>
+        <div className="row">
+          <label>Asset
+            <select value={assetId} onChange={(e) => setAssetId(e.target.value)} required>
+              <option value="">Select asset…</option>
+              {assets.items.map((a) => <option key={a.asset?.id} value={a.asset?.id}>{a.asset?.code} — {a.asset?.name}</option>)}
+            </select>
+          </label>
+          <button type="submit">Open candidate downtime</button>
+        </div>
         <ErrorBox err={err} />
       </form>
       <ErrorBox err={list.err} />
-      <table>
+      <Table>
         <thead><tr><th>Asset</th><th>Classification</th><th>Started</th><th>Restored</th></tr></thead>
         <tbody>
           {list.items.map((d) => (
-            <tr key={d.id}><td>{d.asset_id}</td><td>{d.classification}</td><td>{d.started_at}</td><td>{d.restored_at ?? 'open'}</td></tr>
+            <tr key={d.id}><td><code>{d.asset_id}</code></td><td><Badge state={d.classification} /></td><td>{d.started_at}</td><td>{d.restored_at ?? 'open'}</td></tr>
           ))}
           {!list.items.length && emptyRow(4, list.loading)}
         </tbody>
-      </table>
+      </Table>
     </>
   );
 }
@@ -88,15 +145,28 @@ export function Reports({ siteId }: { siteId: string }) {
   };
   return (
     <>
-      <h2>Reports</h2>
-      <div className="row">
-        <label>Metric
-          <select value={metric} onChange={(e) => setMetric(e.target.value)}>
-            {['failure_count', 'mtbf', 'mttr', 'downtime', 'overdue_backlog', 'pm_compliance', 'repeat_faults', 'maintenance_cost'].map((m) => <option key={m}>{m}</option>)}
-          </select>
-        </label>
-        <button type="button" onClick={() => void run()}>Run</button>
-        <a className="secondary" style={{ padding: '0.45rem 0.8rem', borderRadius: 6, background: '#e8eef8', textDecoration: 'none' }} href={`${M}/exports/work_orders.csv?site_id=${siteId}&from=${new Date(Date.now() - 90 * 86400000).toISOString()}&to=${new Date().toISOString()}`}>Export work orders CSV</a>
+      <PageHeader
+        title="Reports"
+        lede="Reliability metrics for the last 90 days at this site."
+        actions={
+          <a
+            className="secondary"
+            style={{ padding: '0.5rem 0.9rem', borderRadius: 7, background: 'var(--brand-soft)', textDecoration: 'none', fontWeight: 600, color: 'var(--brand)' }}
+            href={`${M}/exports/work_orders.csv?site_id=${siteId}&from=${new Date(Date.now() - 90 * 86400000).toISOString()}&to=${new Date().toISOString()}`}
+          >
+            Export work orders CSV
+          </a>
+        }
+      />
+      <div className="card">
+        <div className="row">
+          <label>Metric
+            <select value={metric} onChange={(e) => setMetric(e.target.value)}>
+              {['failure_count', 'mtbf', 'mttr', 'downtime', 'overdue_backlog', 'pm_compliance', 'repeat_faults', 'maintenance_cost'].map((m) => <option key={m}>{m}</option>)}
+            </select>
+          </label>
+          <button type="button" onClick={() => void run()}>Run report</button>
+        </div>
       </div>
       <ErrorBox err={err} />
       {data && (
@@ -151,8 +221,10 @@ export function Neo({ siteId }: { siteId: string }) {
   };
   return (
     <>
-      <h2>Neo</h2>
-      <p className="muted">Optional assistant. Answers are retrieval-only until a qualified model exists. The proposer cannot approve their own draft. Work forms stay usable if Neo is unavailable.</p>
+      <PageHeader
+        title="Neo"
+        lede="Optional assistant. Answers are retrieval-only until a qualified model exists. The proposer cannot approve their own draft."
+      />
       <form className="card" onSubmit={(e) => void ask(e)}>
         <label>Asset
           <select value={assetId} onChange={(e) => setAssetId(e.target.value)}>

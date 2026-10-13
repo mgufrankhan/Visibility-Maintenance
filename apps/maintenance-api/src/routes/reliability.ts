@@ -21,6 +21,7 @@ import {
   recordExposure,
   REPORT_METRICS,
   restoreDowntime,
+  runMultiSiteReport,
   runReport,
   SYNC_OPERATION_TYPES,
   syncChanges,
@@ -30,6 +31,15 @@ import { z } from 'zod';
 import { API, param, type RouteDeps } from '../http.ts';
 
 const periodQuery = z.object({ site_id: uuid, from: isoTimestamp, to: isoTimestamp, asset_id: uuid.optional() });
+const multiPeriodQuery = z.object({
+  site_ids: z
+    .union([z.string(), z.array(z.string())])
+    .transform((v) => (Array.isArray(v) ? v : v.split(',')))
+    .pipe(z.array(uuid).min(1).max(50)),
+  from: isoTimestamp,
+  to: isoTimestamp,
+  asset_id: uuid.optional(),
+});
 
 const syncOperationsBody = z.object({
   operations: z
@@ -77,6 +87,10 @@ export function registerReliabilityRoutes({ app, s, actor }: RouteDeps): void {
   app.get(`${API}/reports/:metric`, async (req) => {
     const metric = parse(z.enum(REPORT_METRICS), param(req, 'metric'));
     return runReport(s, await actor(req), metric, parse(periodQuery, req.query));
+  });
+  app.get(`${API}/reports/:metric/multi-site`, async (req) => {
+    const metric = parse(z.enum(REPORT_METRICS), param(req, 'metric'));
+    return runMultiSiteReport(s, await actor(req), metric, parse(multiPeriodQuery, req.query));
   });
   app.get(`${API}/exports/:dataset`, async (req, reply) => {
     const dataset = parse(z.enum(EXPORT_DATASETS), param(req, 'dataset').replace(/\.csv$/, ''));

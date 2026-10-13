@@ -4,6 +4,14 @@
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f4f7fb",
-  "theme_color": "#0b3d91",
-  "description": "Standalone maintenance and asset management"
+  "theme_color": "#0a2f6e",
+  "description": "Standalone maintenance and asset management",
+  "icons": [
+    {
+      "src": "/icon-512.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any"
+    }
+  ]
 }

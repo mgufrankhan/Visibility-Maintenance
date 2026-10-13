@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { M, api, type Me } from '../api.ts';
-import { Badge, ErrorBox, emptyRow, useList } from '../ui.tsx';
+import { Badge, ErrorBox, emptyRow, useList, PageHeader, Table } from '../ui.tsx'
 
 export function Settings({ siteId, me }: { siteId: string; me: Me | null }) {
   const teams = useList<any>(`${M}/teams?site_id=${siteId}`);
@@ -95,7 +95,7 @@ export function Settings({ siteId, me }: { siteId: string; me: Me | null }) {
 
   return (
     <>
-      <h2>Settings</h2>
+      <PageHeader title="Settings" lede="Teams, roles, procedures, and site policy for this installation." />
       <ErrorBox err={err} />
       <div className="card">
         <h3>License</h3>
@@ -125,13 +125,13 @@ export function Settings({ siteId, me }: { siteId: string; me: Me | null }) {
         <h3>Teams</h3>
         <label>Name<input value={teamName} onChange={(e) => setTeamName(e.target.value)} required /></label>
         <button type="submit">Create team</button>
-        <table>
+        <Table>
           <thead><tr><th>Name</th><th>Members</th></tr></thead>
           <tbody>
             {teams.items.map((t) => <tr key={t.id}><td>{t.name}</td><td>{(t.member_ids ?? t.members ?? []).length}</td></tr>)}
             {!teams.items.length && emptyRow(2, teams.loading)}
           </tbody>
-        </table>
+        </Table>
       </form>
       <form className="card" onSubmit={(e) => void grant(e)}>
         <h3>Role grants</h3>
@@ -142,13 +142,13 @@ export function Settings({ siteId, me }: { siteId: string; me: Me | null }) {
           </select>
         </label>
         <button type="submit">Grant</button>
-        <table>
+        <Table>
           <thead><tr><th>User</th><th>Role</th><th>Site</th></tr></thead>
           <tbody>
             {roles.items.map((r) => <tr key={r.id}><td>{r.user_id}</td><td>{r.role}</td><td>{r.site_id ?? 'tenant'}</td></tr>)}
             {!roles.items.length && emptyRow(3, roles.loading)}
           </tbody>
-        </table>
+        </Table>
       </form>
       <form className="card" onSubmit={(e) => void createProcedure(e)}>
         <h3>Publish a simple procedure</h3>

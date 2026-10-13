@@ -82,4 +82,4 @@ Owner for every entry below: implementation team (Codex session). Status "Adopte
 | 5 | Docker Compose package, backup/restore scripts, grace enforcement in workers, health split, schema compatibility check | Compose smoke run and restore script run where Docker is available |
 | 6 | Connector contract, ingestion pipeline, quality, dedupe, correlation, cutover, labeled simulator | Contract suite with simulated adapter; provider qualification blocked |
 | 7 | Neo scoped retrieval, tool allowlist, bound approvals, deterministic no-model runtime | Policy, injection and approval tests; 40-case model evaluation blocked |
-| 8 | R2 (parts, CMMS, multi-site) | Not started |
+| 8 | R2 parts ledger, CMMS authority mode + exception queue, multi-site reports, auto-draft automation | `tests/integration/r2.test.ts`; external CMMS HTTP adapter remains not_qualified until a customer system is contracted |

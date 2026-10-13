@@ -1,4 +1,4 @@
-import { checkRegistryBinding, dispatchOutbox, reconcileIncidents, recordHeartbeat, recordJobStatus, runMeterPlans, runPmScheduler, syncRegistry, watchLicenses, type OutboxSink, type Services } from '@vm/core';
+import { checkRegistryBinding, dispatchOutbox, reconcileIncidents, recordHeartbeat, recordJobStatus, runAutomations, runMeterPlans, runPmScheduler, syncRegistry, watchLicenses, type OutboxSink, type Services } from '@vm/core';
 
 export interface WorkerJob {
   name: string;
@@ -22,6 +22,7 @@ export function maintenanceJobs(o: WorkerOptions): WorkerJob[] {
     { name: 'pm-scheduler', intervalMs: 60_000, run: () => runPmScheduler(s, o.workerId) },
     { name: 'meter-pm', intervalMs: 60_000, run: () => runMeterPlans(s, o.workerId) },
     { name: 'incident-reconcile', intervalMs: 30_000, run: () => reconcileIncidents(s) },
+    { name: 'automation', intervalMs: 60_000, run: () => runAutomations(s, o.workerId) },
     { name: 'license-watch', intervalMs: 15 * 60_000, run: () => watchLicenses(s, o.workerId, o.tenantIds()) },
     {
       name: 'registry-sync',

@@ -28,6 +28,7 @@ const supervisor: Permission[] = [
   'maintenance.export',
   'maintenance.recommendation.decide',
   'maintenance.neo.draft',
+  'maintenance.stores.view',
 ];
 
 /**
@@ -38,19 +39,30 @@ export const ROLE_GRANTS: Record<MaintenanceRole, readonly Permission[]> = {
   reporter,
   technician,
   supervisor,
-  maintenance_manager: [...supervisor, 'maintenance.settings.manage', 'maintenance.access.manage'],
+  maintenance_manager: [...supervisor, 'maintenance.settings.manage', 'maintenance.access.manage', 'maintenance.stores.manage'],
   asset_administrator: ['maintenance.view', 'maintenance.profile.manage'],
-  viewer: ['maintenance.view', 'maintenance.report.view', 'maintenance.export'],
+  viewer: ['maintenance.view', 'maintenance.report.view', 'maintenance.export', 'maintenance.stores.view'],
   cost_viewer: ['maintenance.cost.view'],
   maintenance_admin: [
     'maintenance.view',
+    'maintenance.report.view',
+    'maintenance.export',
     'maintenance.settings.manage',
     'maintenance.access.manage',
     'maintenance.license.manage',
     'maintenance.integration.manage',
     'maintenance.automation.manage',
+    'maintenance.stores.view',
+    'maintenance.stores.manage',
+    'maintenance.stores.move',
+    'maintenance.stores.reserve',
   ],
-  stores_user: ['maintenance.view'],
+  stores_user: [
+    'maintenance.view',
+    'maintenance.stores.view',
+    'maintenance.stores.move',
+    'maintenance.stores.reserve',
+  ],
   connector_service: ['maintenance.event.ingest'],
   neo_service: ['maintenance.view', 'maintenance.neo.use', 'maintenance.neo.draft'],
 };

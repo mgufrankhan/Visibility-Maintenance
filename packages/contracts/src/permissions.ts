@@ -29,6 +29,10 @@ export const PERMISSIONS = [
   'maintenance.recommendation.decide',
   'maintenance.neo.use',
   'maintenance.neo.draft',
+  'maintenance.stores.view',
+  'maintenance.stores.manage',
+  'maintenance.stores.move',
+  'maintenance.stores.reserve',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 

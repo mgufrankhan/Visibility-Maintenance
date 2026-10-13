@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { M, api } from '../api.ts';
-import { Badge, ErrorBox, Panel, emptyRow, isoLocal, useList } from '../ui.tsx';
+import { Badge, ErrorBox, PageHeader, Panel, Table, emptyRow, isoLocal, useList } from '../ui.tsx';
 
 export function Requests({ siteId }: { siteId: string }) {
   const list = useList<any>(`${M}/requests?site_id=${siteId}`);
@@ -72,7 +72,7 @@ export function Requests({ siteId }: { siteId: string }) {
 
   return (
     <>
-      <h2>Requests</h2>
+      <PageHeader title="Requests" lede="Report faults and triage them into draft work orders. Asset id is optional when a location is provided." />
       <form className="card" onSubmit={(e) => void submit(e)}>
         <div className="row">
           <label>Asset id (optional)<input value={assetId} onChange={(e) => setAssetId(e.target.value)} placeholder="uuid" /></label>
@@ -83,12 +83,12 @@ export function Requests({ siteId }: { siteId: string }) {
         <ErrorBox err={err} />
       </form>
       <ErrorBox err={list.err} />
-      <table>
+      <Table>
         <thead><tr><th>No.</th><th>State</th><th>Origin</th><th>Description</th></tr></thead>
         <tbody>
           {list.items.map((r) => (
             <tr key={r.id}>
-              <td><button type="button" className="secondary" onClick={() => void open(r.id)}>{r.display_number}</button></td>
+              <td><button type="button" className="linkish" onClick={() => void open(r.id)}>{r.display_number}</button></td>
               <td><Badge state={r.state} /></td>
               <td>{r.origin}</td>
               <td>{r.description}</td>
@@ -96,7 +96,7 @@ export function Requests({ siteId }: { siteId: string }) {
           ))}
           {!list.items.length && emptyRow(4, list.loading, 'No requests yet.')}
         </tbody>
-      </table>
+      </Table>
       {selected && (
         <Panel title={`Request ${selected.display_number} — triage`} onClose={() => setSelected(null)}>
           <p>{selected.description}</p>

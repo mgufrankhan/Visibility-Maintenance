@@ -18,7 +18,7 @@ Date: 13 October 2026. This is an engineering status report for the Codex implem
 | OpenAPI / events | Done | `docs/generated/` from Zod (`npm run openapi`) |
 | Neo review tools | Done | `draft_work_order`, `propose_checklist` (review-only; no model) |
 | Release ops | Done locally | `tools/sign-release.sh` digests + optional cosign; optional `BLOB_STORE=s3` |
-| 8 R2 | Not started | Explicitly deferred |
+| 8 R2 | Done locally | Parts ledger, CMMS authority + exception queue, multi-site reports, approved auto-draft automation; external CMMS HTTP adapter not qualified |
 
 ## Executable commands
 
@@ -56,7 +56,7 @@ Optional Neo retrieval (no model): `docker compose -f compose.yaml -f compose.ne
 
 ## Locally verified vs unverified
 
-**Locally verified (this repository):** `npx tsc -p tsconfig.json` and `tsc -p apps/maintenance-web/tsconfig.json` clean; **16 files / 150 tests** passed (`vitest run`); web production build succeeded. Covered: platform identity and registry; maintenance requests, work orders, PM, inspections, QR, offline sync, downtime, KPIs, exports; licensing continuity; backup/restore scripts; labeled simulated connector; meter PM; condition incidents; Neo retrieval (including review-only `draft_work_order` / `propose_checklist`), document instruction filtering, bound approvals and no self-approval. Per-AC local evidence: `docs/09_RELEASE_EVIDENCE.md`.
+**Locally verified (this repository):** `npx tsc -p tsconfig.json` and `tsc -p apps/maintenance-web/tsconfig.json` clean; **17 files / 154 tests** passed (`vitest run`); web production build succeeded. Covered: platform identity and registry; maintenance requests, work orders, PM, inspections, QR, offline sync, downtime, KPIs, exports; licensing continuity; backup/restore scripts; labeled simulated connector; meter PM; condition incidents; Neo retrieval (including review-only `draft_work_order` / `propose_checklist`), document instruction filtering, bound approvals and no self-approval; R2 parts ledger, CMMS authority/exception queue, multi-site reports, and policy-gated auto-draft automation. Per-AC local evidence: `docs/09_RELEASE_EVIDENCE.md`.
 
 **Unverified / left blocked until owners or credentials exist:**
 
@@ -71,7 +71,7 @@ Optional Neo retrieval (no model): `docker compose -f compose.yaml -f compose.ne
 | License commercial terms (D12) | Pending commercial approval. |
 | Asset consolidation (D15, AC-19) | Per existing installation. |
 | Cache/device security review (D14) | Security owner. |
-| Phase 8 / R2 | Parts ledger, CMMS authority, multi-site reporting, approved automation — do not start unless asked. |
+| External CMMS HTTP adapter | Field ownership and exception queue ship; live bidirectional sync needs a customer CMMS contract (AC-13 partial). |
 
 Image digests and an optional cosign-signed bundle can be produced with `npm run release:bundle` when Docker and (optionally) cosign keys are available; customer registry push and site TLS remain owner tasks.
 
@@ -93,6 +93,6 @@ Do not treat the simulator or the deterministic Neo runtime as a qualified conne
 - Provider qualification with authorized read access.
 - 40-case Neo evaluation on a chosen runtime.
 - Pilot handoff (site, assets, users, four-week observation).
-- R2 scope.
+- External CMMS provider qualification (bidirectional sync against a real CMMS).
 
 Expiry never deletes data. Cloud inference is not enabled by this package. PLC writes are not implemented.

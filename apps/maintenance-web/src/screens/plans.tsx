@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { M, api } from '../api.ts';
-import { Badge, ErrorBox, Panel, emptyRow, useList } from '../ui.tsx';
+import { Badge, ErrorBox, Panel, emptyRow, useList, PageHeader, Table } from '../ui.tsx'
 
 export function Plans({ siteId }: { siteId: string }) {
   const list = useList<any>(`${M}/plans?site_id=${siteId}`);
@@ -97,7 +97,7 @@ export function Plans({ siteId }: { siteId: string }) {
 
   return (
     <>
-      <h2>Preventive maintenance</h2>
+      <PageHeader title="Preventive maintenance" lede="Publish calendar and meter-based plans. Pause stops generation without deleting history." />
       <form className="card" onSubmit={(e) => void create(e)}>
         <h3>New calendar plan</h3>
         <label>Title<input value={title} onChange={(e) => setTitle(e.target.value)} required /></label>
@@ -143,7 +143,7 @@ export function Plans({ siteId }: { siteId: string }) {
         <ErrorBox err={err} />
       </form>
       <ErrorBox err={list.err} />
-      <table>
+      <Table>
         <thead><tr><th>Title</th><th>Status</th><th>Next</th><th></th></tr></thead>
         <tbody>
           {list.items.map((p) => (
@@ -156,7 +156,7 @@ export function Plans({ siteId }: { siteId: string }) {
           ))}
           {!list.items.length && emptyRow(4, list.loading, 'No plans yet.')}
         </tbody>
-      </table>
+      </Table>
       {selected && (
         <Panel title={selected.title} onClose={() => setSelected(null)}>
           <p><Badge state={selected.status} /> v{selected.version} · next {selected.next_generate_at ?? '—'}</p>

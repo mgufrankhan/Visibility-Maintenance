@@ -9,8 +9,9 @@ import { MyWork } from './screens/my-work.tsx';
 import { Plans } from './screens/plans.tsx';
 import { Requests } from './screens/requests.tsx';
 import { Settings } from './screens/settings.tsx';
+import { Parts } from './screens/parts.tsx';
 import { WorkOrders } from './screens/work.tsx';
-import { ErrorBox } from './ui.tsx';
+import { BrandLogo, ConnectionStatus, EmptyState, ErrorBox } from './ui.tsx';
 
 type Route =
   | 'overview'
@@ -19,6 +20,7 @@ type Route =
   | 'pm'
   | 'inspections'
   | 'assets'
+  | 'parts'
   | 'connectors'
   | 'downtime'
   | 'reports'
@@ -26,31 +28,56 @@ type Route =
   | 'neo'
   | 'my-work';
 
-const ROUTES: Array<{ id: Route; label: string }> = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'requests', label: 'Requests' },
-  { id: 'work', label: 'Work Orders' },
-  { id: 'my-work', label: 'My Work' },
-  { id: 'pm', label: 'Preventive Maintenance' },
-  { id: 'inspections', label: 'Inspections' },
-  { id: 'assets', label: 'Assets' },
-  { id: 'connectors', label: 'Connectors' },
-  { id: 'downtime', label: 'Downtime' },
-  { id: 'reports', label: 'Reports' },
-  { id: 'neo', label: 'Neo' },
-  { id: 'settings', label: 'Settings' },
+const NAV_GROUPS: Array<{ label: string; items: Array<{ id: Route; label: string }> }> = [
+  {
+    label: 'Work',
+    items: [
+      { id: 'overview', label: 'Overview' },
+      { id: 'my-work', label: 'My Work' },
+      { id: 'requests', label: 'Requests' },
+      { id: 'work', label: 'Work Orders' },
+      { id: 'pm', label: 'PM Plans' },
+      { id: 'inspections', label: 'Inspections' },
+    ],
+  },
+  {
+    label: 'Assets & stock',
+    items: [
+      { id: 'assets', label: 'Assets' },
+      { id: 'parts', label: 'Parts' },
+      { id: 'downtime', label: 'Downtime' },
+    ],
+  },
+  {
+    label: 'Insights',
+    items: [
+      { id: 'reports', label: 'Reports' },
+      { id: 'neo', label: 'Neo' },
+    ],
+  },
+  {
+    label: 'System',
+    items: [
+      { id: 'connectors', label: 'Connectors' },
+      { id: 'settings', label: 'Settings' },
+    ],
+  },
 ];
+
+const ALL_ROUTES = NAV_GROUPS.flatMap((g) => g.items);
+
+const SITE_KEY = 'vm.siteId';
 
 function routeFromHash(): Route {
   const id = location.hash.replace(/^#\/?/, '') as Route;
-  return ROUTES.some((r) => r.id === id) ? id : 'overview';
+  return ALL_ROUTES.some((r) => r.id === id) ? id : 'overview';
 }
 
 export function App() {
   const [session, setSession] = useState<Session | null>(() => loadSession());
   const [me, setMe] = useState<Me | null>(null);
   const [sites, setSites] = useState<Site[]>([]);
-  const [siteId, setSiteId] = useState('');
+  const [siteId, setSiteId] = useState(() => sessionStorage.getItem(SITE_KEY) ?? '');
   const [route, setRoute] = useState<Route>(routeFromHash);
   const [online, setOnline] = useState(navigator.onLine);
   const [queue, setQueue] = useState<QueuedOperation[]>([]);
@@ -69,25 +96,47 @@ export function App() {
     };
   }, []);
 
+  const chooseSite = (id: string) => {
+    setSiteId(id);
+    if (id) sessionStorage.setItem(SITE_KEY, id);
+    else sessionStorage.removeItem(SITE_KEY);
+  };
+
   const loadQueue = useCallback(async () => setQueue(await listQueue()), []);
 
   useEffect(() => {
     if (!session) return;
     let cancelled = false;
     (async () => {
+      setBootError(null);
+      let list: Site[] = [];
+      const saved = sessionStorage.getItem(SITE_KEY) ?? '';
       try {
-        const [who, siteList] = await Promise.all([
-          api<Me>(`${M}/me`),
-          api<{ items?: Site[] } | Site[]>('/api/v1/identity/sites'),
-        ]);
+        const siteList = await api<{ items?: Site[] } | Site[]>('/api/v1/identity/sites');
         if (cancelled) return;
-        setMe(who);
-        const list = Array.isArray(siteList) ? siteList : siteList.items ?? [];
+        list = Array.isArray(siteList) ? siteList : siteList.items ?? [];
         setSites(list);
-        setSiteId((current) => current || who.maintenance_sites[0] || who.sites[0]?.site_id || list[0]?.id || '');
-        await loadQueue();
       } catch (e) {
         if (!cancelled) setBootError(e);
+      }
+      try {
+        const who = await api<Me>(`${M}/me`);
+        if (cancelled) return;
+        setMe(who);
+        const known = (id: string) => list.some((s) => s.id === id) || who.sites.some((s) => s.site_id === id);
+        const preferred =
+          (saved && known(saved) ? saved : '')
+          || who.maintenance_sites[0]
+          || who.sites[0]?.site_id
+          || list[0]?.id
+          || '';
+        chooseSite(preferred);
+        await loadQueue();
+      } catch (e) {
+        if (cancelled) return;
+        setBootError(e);
+        const fallback = (saved && list.some((s) => s.id === saved) ? saved : '') || list[0]?.id || '';
+        chooseSite(fallback);
       }
     })();
     return () => {
@@ -100,60 +149,93 @@ export function App() {
   return (
     <div className="shell">
       <nav className="side" aria-label="Product">
-        <h1>Visibility Maintenance</h1>
-        {ROUTES.map((r) => (
-          <a key={r.id} href={`#/${r.id}`} aria-current={route === r.id ? 'page' : undefined}>{r.label}</a>
-        ))}
+        <BrandLogo variant="nav" />
+        <div className="nav-groups">
+          {NAV_GROUPS.map((group) => (
+            <div key={group.label}>
+              <div className="nav-group-label">{group.label}</div>
+              {group.items.map((r) => (
+                <a key={r.id} href={`#/${r.id}`} aria-current={route === r.id ? 'page' : undefined}>{r.label}</a>
+              ))}
+            </div>
+          ))}
+        </div>
       </nav>
       <main>
         <div className="top">
-          <div>
+          <div className="top-identity">
             <strong>{me?.display_name ?? '…'}</strong>
-            <div className="muted">{online ? 'Online' : 'Offline — cached work only'}</div>
+            <ConnectionStatus online={online} />
           </div>
-          <div className="row">
+          <div className="top-actions">
             <label>
               Site
-              <select value={siteId} onChange={(e) => setSiteId(e.target.value)} aria-label="Site">
+              <select value={siteId} onChange={(e) => chooseSite(e.target.value)} aria-label="Site">
+                {!siteId && <option value="">Select a site…</option>}
                 {sites.map((s) => <option key={s.id} value={s.id}>{s.code} — {s.name}</option>)}
                 {!sites.length && me?.sites.map((s) => <option key={s.site_id} value={s.site_id}>{s.site_id}</option>)}
               </select>
             </label>
-            <button className="secondary" type="button" onClick={() => { void logout(); setSession(null); void clearQueue(); }}>Sign out</button>
+            <button
+              className="secondary"
+              type="button"
+              onClick={() => { void logout(); setSession(null); setMe(null); void clearQueue(); sessionStorage.removeItem(SITE_KEY); }}
+            >
+              Sign out
+            </button>
           </div>
         </div>
-        <ErrorBox err={bootError} />
-        {queue.length > 0 && <QueueBanner items={queue} onFlush={() => flushQueue(loadQueue)} />}
-        {siteId ? <Screen route={route} siteId={siteId} me={me} online={online} onQueued={loadQueue} /> : <p className="muted">No site is in scope for this account.</p>}
+        <div className="content">
+          <ErrorBox err={bootError} />
+          {queue.length > 0 && <QueueBanner items={queue} onFlush={() => flushQueue(loadQueue)} />}
+          {siteId ? (
+            <Screen route={route} siteId={siteId} me={me} online={online} onQueued={loadQueue} />
+          ) : (
+            <div className="card">
+              <EmptyState
+                title="No site in scope"
+                detail="This account has no site membership yet, or the maintenance API is unavailable. Ask an administrator to grant a site, then refresh."
+              />
+            </div>
+          )}
+        </div>
       </main>
     </div>
   );
 }
 
 function Login({ onSignedIn }: { onSignedIn: (s: Session) => void }) {
-  const [tenant, setTenant] = useState('acme');
+  const [tenant, setTenant] = useState('cew');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setErr(null);
+    setBusy(true);
     try {
       onSignedIn(await login(tenant, email, password));
     } catch (error) {
       setErr(error);
+    } finally {
+      setBusy(false);
     }
   };
   return (
-    <form className="card login" onSubmit={(e) => void submit(e)}>
-      <h1>Visibility Maintenance</h1>
-      <p className="muted">Sign in with your site credentials. Core work stays available if Neo or telemetry are offline.</p>
-      <label>Tenant slug<input value={tenant} onChange={(e) => setTenant(e.target.value)} required autoComplete="organization" /></label>
-      <label>Email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="username" /></label>
-      <label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" /></label>
-      <ErrorBox err={err} />
-      <button type="submit">Sign in</button>
-    </form>
+    <div className="login-page">
+      <form className="card login" onSubmit={(e) => void submit(e)}>
+        <BrandLogo variant="full" />
+        <p className="muted login-lead">
+          Sign in with your site credentials. Core work stays available if Neo or telemetry are offline.
+        </p>
+        <label>Tenant slug<input value={tenant} onChange={(e) => setTenant(e.target.value)} required autoComplete="organization" /></label>
+        <label>Email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="username" /></label>
+        <label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" /></label>
+        <ErrorBox err={err} />
+        <button type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+      </form>
+    </div>
   );
 }
 
@@ -161,10 +243,16 @@ function QueueBanner({ items, onFlush }: { items: QueuedOperation[]; onFlush: ()
   const pending = items.filter((i) => i.status === 'pending').length;
   const conflicts = items.filter((i) => i.status !== 'pending');
   return (
-    <div className="card" role="status">
-      <strong>Offline queue:</strong> {pending} pending{conflicts.length ? `, ${conflicts.length} need review` : ''}.
+    <div className={`card queue-banner ${conflicts.length ? 'alert-warn' : ''}`} role="status">
+      <p className="queue-copy">
+        <strong>Offline queue</strong>
+        {' — '}
+        {pending} pending{conflicts.length ? `, ${conflicts.length} need review` : ''}.
+        {conflicts.map((c) => (
+          <span key={c.client_op_id} className="err"> {c.type} {c.record_id}: {c.server_error}</span>
+        ))}
+      </p>
       <button type="button" className="secondary" onClick={onFlush}>Retry sync</button>
-      {conflicts.map((c) => <p key={c.client_op_id} className="err">{c.type} {c.record_id}: {c.server_error}</p>)}
     </div>
   );
 }
@@ -212,6 +300,8 @@ function Screen({ route, siteId, me, online, onQueued }: { route: Route; siteId:
       return <Inspections siteId={siteId} />;
     case 'assets':
       return <Assets siteId={siteId} />;
+    case 'parts':
+      return <Parts siteId={siteId} />;
     case 'connectors':
       return <Connectors siteId={siteId} />;
     case 'downtime':

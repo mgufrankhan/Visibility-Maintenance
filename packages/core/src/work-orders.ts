@@ -18,6 +18,7 @@ import type { z } from 'zod';
 import { completionGaps, type CurrentResult } from './checks.ts';
 import { actorId, actorKind, isSystem, tenantOf, type Actor, type AnyActor, type Services } from './context.ts';
 import { isTeamMember, requirePermission } from './access.ts';
+import { assertNativeFieldMutable } from './authority.ts';
 import { assertAssetAcceptsNewWork, identitySnapshot, resolveAsset, type AssetIdentity } from './identity-snapshots.ts';
 import { issuableRevision, type ProcedureSnapshot } from './procedures.ts';
 import { enqueueEvent, iso, nextDisplayNumber, writeAudit } from './records.ts';
@@ -353,6 +354,8 @@ export async function patchWorkOrder(s: Services, actor: Actor, id: string, expe
   const p = actor.principal;
   const fields = Object.keys(patch) as Array<keyof PatchWorkOrder>;
   if (fields.length === 0) throw invalid('No fields to update');
+  const preview = await loadVisible(s.db, actor, id);
+  await assertNativeFieldMutable(s, actor, preview.site_id, preview.id, fields as string[]);
   return withTransaction(s.db, async (tx) => {
     const wo = await loadVisible(tx, actor, id, true);
     const nonAssign = fields.filter((f) => f !== 'assignee_id');
@@ -440,6 +443,7 @@ export async function transitionWorkOrder(s: Services, actor: Actor, id: string,
   const p = actor.principal;
   return withTransaction(s.db, async (tx) => {
     const preview = await loadVisible(tx, actor, id);
+    await assertNativeFieldMutable(s, actor, preview.site_id, preview.id, ['state']);
     return runIdempotent(tx, IDEM, { tenantId: p.tenantId, actorId: p.userId, operation: `work_order.transition:${preview.id}` }, key, req, async () => {
       const wo = await loadVisible(tx, actor, id, true);
       const from = wo.state as WorkOrderState;

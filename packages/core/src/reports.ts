@@ -17,6 +17,13 @@ export interface ReportQuery {
   asset_id?: string;
 }
 
+export interface MultiSiteReportQuery {
+  site_ids: string[];
+  from: string;
+  to: string;
+  asset_id?: string;
+}
+
 interface Scope {
   tenantId: string;
   siteId: string;
@@ -183,12 +190,24 @@ async function maintenanceCost(s: Services, sc: Scope) {
       WHERE c.tenant_id = $1 AND c.site_id = $2 AND c.approved AND ($3::uuid IS NULL OR w.asset_id = $3) AND w.state = 'closed' AND w.closed_at >= $4 AND w.closed_at < $5 GROUP BY c.currency`,
     [sc.tenantId, sc.siteId, sc.assetId, sc.from, sc.to],
   );
+  const { rows: parts } = await s.db.query(
+    `SELECT m.currency, sum((-m.quantity) * coalesce(m.unit_cost, 0))::float8 AS amount, count(*)::int AS issues
+       FROM maintenance.stock_movement m
+      WHERE m.tenant_id = $1 AND m.site_id = $2 AND m.movement_type = 'issue' AND m.unit_cost IS NOT NULL
+        AND m.created_at >= $3 AND m.created_at < $4
+        AND ($5::uuid IS NULL OR EXISTS (
+          SELECT 1 FROM maintenance.work_order w WHERE w.id = m.work_order_id AND w.asset_id = $5
+        ))
+      GROUP BY m.currency`,
+    [sc.tenantId, sc.siteId, sc.from, sc.to, sc.assetId],
+  );
   const unrated = labor.reduce((a, l) => a + l.unrated, 0);
   return {
-    basis: 'Approved labor at the rate in effect when work started, plus approved external service cost, for orders closed in the period',
+    basis: 'Approved labor at the rate in effect when work started, plus approved external service cost, plus issued parts with unit cost, for the period',
     labor: labor.filter((l) => l.currency).map((l) => ({ currency: l.currency, amount: Math.round(l.amount * 100) / 100 })),
     external_services: external.map((e) => ({ currency: e.currency, amount: e.amount })),
-    coverage: { labor_entries_without_rate: unrated, parts: 'not tracked in this release' },
+    parts: parts.filter((p) => p.currency).map((p) => ({ currency: p.currency, amount: Math.round(p.amount * 100) / 100, issue_count: p.issues })),
+    coverage: { labor_entries_without_rate: unrated, parts: 'issued movements with unit_cost in the period' },
   };
 }
 
@@ -239,5 +258,22 @@ export async function runReport(s: Services, actor: Actor, metric: ReportMetric,
     scope: { site_id: q.site_id, asset_id: q.asset_id ?? null },
     generated_at: s.clock.now().toISOString(),
     ...data,
+  };
+}
+
+/** Runs the same metric for each permitted site and returns per-site results (R2 multi-site). */
+export async function runMultiSiteReport(s: Services, actor: Actor, metric: ReportMetric, q: MultiSiteReportQuery) {
+  if (!q.site_ids.length) throw invalid('At least one site_id is required', { site_ids: ['Required'] });
+  if (q.site_ids.length > 50) throw invalid('At most 50 sites per multi-site report', { site_ids: ['Too many'] });
+  const sites = [];
+  for (const siteId of q.site_ids) {
+    sites.push(await runReport(s, actor, metric, { site_id: siteId, from: q.from, to: q.to, asset_id: q.asset_id }));
+  }
+  return {
+    metric,
+    period: { from: q.from, to: q.to },
+    scope: { site_ids: q.site_ids, asset_id: q.asset_id ?? null },
+    generated_at: s.clock.now().toISOString(),
+    sites,
   };
 }

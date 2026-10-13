@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { ApiError, M, api } from '../api.ts';
-import { Badge, ErrorBox, Panel, emptyRow, isoLocal, uploadEvidence, useList } from '../ui.tsx';
+import { Badge, ErrorBox, Panel, emptyRow, isoLocal, uploadEvidence, useList, PageHeader, Table } from '../ui.tsx'
 
 export function WorkOrders({ siteId }: { siteId: string }) {
   const list = useList<any>(`${M}/work-orders?site_id=${siteId}`);
@@ -160,10 +160,10 @@ export function WorkOrders({ siteId }: { siteId: string }) {
 
   return (
     <>
-      <h2>Work orders</h2>
+      <PageHeader title="Work orders" lede="Plan, execute, and close work for this site." />
       <ErrorBox err={list.err ?? err} />
       {conflict && <p className="err" role="alert">Version conflict: {conflict}. Reloaded the current server state.</p>}
-      <table>
+      <Table>
         <thead><tr><th>No.</th><th>Title</th><th>State</th><th>Assignee</th><th>Due</th></tr></thead>
         <tbody>
           {list.items.map((w) => (
@@ -177,7 +177,7 @@ export function WorkOrders({ siteId }: { siteId: string }) {
           ))}
           {!list.items.length && emptyRow(5, list.loading)}
         </tbody>
-      </table>
+      </Table>
       {selected && (
         <Panel title={`WO-${selected.display_number} ${selected.title}`} onClose={() => setSelected(null)}>
           <p><Badge state={selected.state} /> v{selected.version}</p>

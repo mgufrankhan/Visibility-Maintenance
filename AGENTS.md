@@ -5,6 +5,7 @@ Standalone maintenance product. Core must work without Visibility Live, OpenRemo
 ## Commands
 
 ```sh
+npm run dev              # local stack: migrate + platform :5191 + API :5192 + worker + web :5173
 npx tsc -p tsconfig.json
 npx tsc -p apps/maintenance-web/tsconfig.json
 npx vitest run
@@ -14,7 +15,9 @@ npm run openapi
 npm run release:bundle
 ```
 
-Integration tests need local PostgreSQL (`TEST_DATABASE_ADMIN_URL`, default `postgres://localhost:5432/postgres`) and must use the **source** migration directories. Do not rely on `MIGRATIONS_ROOT` if it points at a stale `dist/migrations`.
+`npm run dev` needs local PostgreSQL (`TEST_DATABASE_ADMIN_URL`, default `postgres://localhost:5432/postgres`). State and secrets live under `.dev/` (gitignored). First run creates database `vm_dev` and tenant `dev` / `admin@dev.local` / `dev-admin-password`.
+
+Integration tests need the same PostgreSQL admin URL and must use the **source** migration directories. Do not rely on `MIGRATIONS_ROOT` if it points at a stale `dist/migrations`.
 
 Private install: `deploy/private/README.md`.
 
@@ -23,7 +26,7 @@ npm run openapi          # Zod → docs/generated/openapi.json + events.schema.j
 npm run release:bundle   # image digests + optional cosign-signed tarball (needs Docker)
 ```
 
-Leave Live/OpenRemote qualification, Neo 40-case model eval, external IdP, customer TLS/DNS, commercial license terms, and Phase 8/R2 blocked until owners or credentials exist (see `docs/13_COMPLETION_REPORT.md`).
+Leave Live/OpenRemote qualification, Neo 40-case model eval, external IdP, customer TLS/DNS, commercial license terms, and external CMMS HTTP sync blocked until owners or credentials exist (see `docs/13_COMPLETION_REPORT.md`).
 
 ## Boundaries
 

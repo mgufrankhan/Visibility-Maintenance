@@ -11,6 +11,7 @@ import { registerReliabilityRoutes } from './routes/reliability.ts';
 import { registerIntegrationRoutes } from './routes/integrations.ts';
 import { registerMonitoringRoutes } from './routes/monitoring.ts';
 import { registerNeoRoutes } from './routes/neo.ts';
+import { registerR2Routes } from './routes/r2.ts';
 
 export interface MaintenanceAppOptions {
   services: Services;
@@ -48,6 +49,7 @@ export async function buildMaintenanceApp(opts: MaintenanceAppOptions): Promise<
   registerIntegrationRoutes(deps);
   registerMonitoringRoutes(deps);
   registerNeoRoutes(deps);
+  registerR2Routes(deps);
   registerAttachmentRoutes(deps);
   return app;
 }

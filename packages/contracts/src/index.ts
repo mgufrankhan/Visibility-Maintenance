@@ -4,5 +4,6 @@ export * from './registry.ts';
 export * from './permissions.ts';
 export * from './licensing.ts';
 export * from './maintenance.ts';
+export * from './parts.ts';
 export * from './integration.ts';
 export * from './neo.ts';

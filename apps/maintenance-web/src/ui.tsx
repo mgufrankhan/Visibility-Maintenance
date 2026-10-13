@@ -8,6 +8,27 @@ export function statusBadge(state: string) {
   return '';
 }
 
+/** Humanize snake_case / kebab status labels for display. */
+export function prettyLabel(value: string): string {
+  return value.replace(/[_-]+/g, ' ');
+}
+
+/** Product mark — full lockup on login, compact mark in the shell nav. */
+export function BrandLogo({ variant = 'full' }: { variant?: 'full' | 'nav' }) {
+  if (variant === 'nav') {
+    return (
+      <a className="brand brand-nav" href="#/overview" aria-label="Visibility Maintenance">
+        <img src="/logo.jpg" alt="" width={180} height={72} decoding="async" />
+      </a>
+    );
+  }
+  return (
+    <div className="brand brand-hero">
+      <img src="/logo.jpg" alt="Visibility Maintenance" width={320} height={128} decoding="async" />
+    </div>
+  );
+}
+
 export function ErrorBox({ err }: { err: unknown }) {
   if (!err) return null;
   if (err instanceof ApiError) {
@@ -15,16 +36,70 @@ export function ErrorBox({ err }: { err: unknown }) {
       ? Object.entries(err.field_errors).map(([k, v]) => `${k}: ${v.join('; ')}`).join(' · ')
       : '';
     return (
-      <p className="err" role="alert">
-        {err.message}{fields ? ` — ${fields}` : ''}{err.correlation_id ? ` (${err.correlation_id})` : ''}
-      </p>
+      <div className="alert alert-error" role="alert">
+        <div>
+          <strong>{err.message}</strong>
+          {fields ? <div>{fields}</div> : null}
+          {err.correlation_id ? <div className="muted" style={{ color: 'inherit', opacity: 0.85 }}>Ref {err.correlation_id}</div> : null}
+        </div>
+      </div>
     );
   }
-  return <p className="err" role="alert">{String(err)}</p>;
+  return (
+    <div className="alert alert-error" role="alert">
+      <div>{String(err)}</div>
+    </div>
+  );
+}
+
+export function Notice({ children, tone = 'info' }: { children: ReactNode; tone?: 'info' | 'warn' }) {
+  return (
+    <div className={`alert alert-${tone}`} role="status">
+      <div>{children}</div>
+    </div>
+  );
 }
 
 export function Badge({ state }: { state: string }) {
-  return <span className={`badge ${statusBadge(state)}`}>{state}</span>;
+  return <span className={`badge ${statusBadge(state)}`}>{prettyLabel(state)}</span>;
+}
+
+export function ConnectionStatus({ online }: { online: boolean }) {
+  return (
+    <span className="status-pill">
+      <span className={`status-dot ${online ? 'online' : 'offline'}`} aria-hidden="true" />
+      {online ? 'Online' : 'Offline — cached work only'}
+    </span>
+  );
+}
+
+export function PageHeader({
+  title,
+  lede,
+  actions,
+}: {
+  title: string;
+  lede?: string;
+  actions?: ReactNode;
+}) {
+  return (
+    <header className="page-header">
+      <div>
+        <h2>{title}</h2>
+        {lede ? <p className="lede">{lede}</p> : null}
+      </div>
+      {actions ? <div className="page-header-actions">{actions}</div> : null}
+    </header>
+  );
+}
+
+export function EmptyState({ title, detail }: { title: string; detail?: string }) {
+  return (
+    <div className="empty-state">
+      <strong>{title}</strong>
+      {detail ? <p className="muted">{detail}</p> : null}
+    </div>
+  );
 }
 
 export function Panel({ title, children, onClose }: { title: string; children: ReactNode; onClose?: () => void }) {
@@ -98,6 +173,24 @@ export function isoLocal(d = new Date()): string {
 }
 
 export function emptyRow(colSpan: number, loading: boolean, label = 'No records.') {
-  if (loading) return <tr><td colSpan={colSpan} className="muted">Loading…</td></tr>;
-  return <tr><td colSpan={colSpan} className="muted">{label}</td></tr>;
+  if (loading) {
+    return (
+      <tr>
+        <td colSpan={colSpan}>
+          <div className="skeleton" style={{ width: '40%', margin: '0.35rem 0' }} />
+        </td>
+      </tr>
+    );
+  }
+  return (
+    <tr>
+      <td colSpan={colSpan}>
+        <EmptyState title={label} />
+      </td>
+    </tr>
+  );
+}
+
+export function Table({ children }: { children: ReactNode }) {
+  return <div className="table-wrap"><table>{children}</table></div>;
 }

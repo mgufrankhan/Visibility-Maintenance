@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { M, api } from '../api.ts';
-import { Badge, ErrorBox, Panel, emptyRow, useList } from '../ui.tsx';
+import { Badge, ErrorBox, Panel, emptyRow, useList, PageHeader, Table } from '../ui.tsx'
 
 export function Connectors({ siteId }: { siteId: string }) {
   const list = useList<any>(`${M}/connectors?site_id=${siteId}`);
@@ -73,21 +73,21 @@ export function Connectors({ siteId }: { siteId: string }) {
 
   return (
     <>
-      <h2>Connectors</h2>
+      <PageHeader title="Connectors" lede="Live and OpenRemote stay not qualified until provider evidence exists. Simulator is labeled and opt-in." />
       <p className="muted">
         Live and OpenRemote adapters are not qualified and refuse to connect. Only the labeled simulated connector can produce events,
         and only when <code>ALLOW_SIMULATED_CONNECTORS=true</code>. Core work continues if connectors are disabled.
       </p>
       <button type="button" className="secondary" onClick={() => void loadCompat()}>Show compatibility matrix</button>
       {compat && (
-        <table>
+        <Table>
           <thead><tr><th>Provider</th><th>Status</th><th>Notes</th></tr></thead>
           <tbody>
             {compat.map((c) => (
               <tr key={c.provider}><td>{c.provider}</td><td><Badge state={c.status} /></td><td>{(c.limitations ?? []).join(' ') || '—'}</td></tr>
             ))}
           </tbody>
-        </table>
+        </Table>
       )}
       <form className="card" onSubmit={(e) => void create(e)}>
         <h3>Create labeled simulator</h3>
@@ -97,7 +97,7 @@ export function Connectors({ siteId }: { siteId: string }) {
         <ErrorBox err={err} />
       </form>
       <ErrorBox err={list.err} />
-      <table>
+      <Table>
         <thead><tr><th>Name</th><th>Provider</th><th>Status</th><th>Simulated</th><th></th></tr></thead>
         <tbody>
           {list.items.map((c) => (
@@ -111,7 +111,7 @@ export function Connectors({ siteId }: { siteId: string }) {
           ))}
           {!list.items.length && emptyRow(5, list.loading, 'No connectors configured.')}
         </tbody>
-      </table>
+      </Table>
       <h3>Review queue</h3>
       <ErrorBox err={reviews.err} />
       <ul>

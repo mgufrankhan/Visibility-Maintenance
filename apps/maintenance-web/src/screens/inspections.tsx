@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { M, api } from '../api.ts';
-import { Badge, ErrorBox, Panel, emptyRow, isoLocal, uploadEvidence, useList } from '../ui.tsx';
+import { Badge, ErrorBox, Panel, emptyRow, isoLocal, uploadEvidence, useList, PageHeader, Table } from '../ui.tsx'
 
 export function Inspections({ siteId }: { siteId: string }) {
   const results = useList<any>(`${M}/inspection-results?site_id=${siteId}`);
@@ -100,7 +100,7 @@ export function Inspections({ siteId }: { siteId: string }) {
 
   return (
     <>
-      <h2>Inspections</h2>
+      <PageHeader title="Inspections" lede="Run checklists and capture evidence before submit." />
       <form className="card" onSubmit={(e) => void createTemplate(e)}>
         <h3>Publish a simple template</h3>
         <label>Title<input value={templateTitle} onChange={(e) => setTemplateTitle(e.target.value)} required /></label>
@@ -126,7 +126,7 @@ export function Inspections({ siteId }: { siteId: string }) {
         <ErrorBox err={err} />
       </form>
       <ErrorBox err={results.err} />
-      <table>
+      <Table>
         <thead><tr><th>Asset</th><th>Status</th><th>Submitted</th><th></th></tr></thead>
         <tbody>
           {results.items.map((r) => (
@@ -139,7 +139,7 @@ export function Inspections({ siteId }: { siteId: string }) {
           ))}
           {!results.items.length && emptyRow(4, results.loading)}
         </tbody>
-      </table>
+      </Table>
       {selected && (
         <Panel title={`Inspection ${selected.id.slice(0, 8)}`} onClose={() => setSelected(null)}>
           <p><Badge state={selected.status} /> asset {selected.asset_id}</p>

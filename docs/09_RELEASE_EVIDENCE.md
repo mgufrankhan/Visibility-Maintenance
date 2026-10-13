@@ -26,7 +26,7 @@
 | AC-10 action integrity | Stale approval / revoked permission blocked | Pass | Neo bound approval; role revoke offline test | Pass local |
 | AC-11 KPI reconciliation | Section 15 sample numbers | Pass | KPI fixture / reliability tests | Pass local |
 | AC-12 continuity + restore | Offline workflows; backup restore | Pass Compose/local backup path | `tests/integration/operations.test.ts`; `deploy/private` | Pass local; customer drill pending |
-| AC-13 CMMS authority | R2 | Not started | — | Phase 8 / R2 |
+| AC-13 CMMS authority | Field ownership + exception queue; external CMMS HTTP not qualified | Pass local (native + exception path) | `tests/integration/r2.test.ts` | Partial; live CMMS sync blocked |
 | AC-14 archived/moved assets | Block new work; history scoped | Pass | Profile / asset lifecycle tests | Pass local |
 | AC-15 independent product | Live/OR/Neo absent still works | Pass | Standalone install + Compose | Pass local |
 | AC-16 Live connector | Real Live events | **Blocked** — adapters `not_qualified` | Connectors UI refuse | Blocked |
@@ -46,6 +46,7 @@ Exercised on `http://127.0.0.1:5173` against the fixture above:
 4. Settings: publish procedure; PM planner publish / preview / pause.
 5. Connectors screen states Live/OpenRemote as not qualified; simulator only when allowed.
 6. Offline queue banner present in SPA (`QueueBanner`); API conflicts covered by `offline-sync.test.ts`. Browser showed conflict review text for a stale `submit_completion` against an `on_hold` order (`version_conflict` / current version 5).
+7. Parts screen (`Parts` nav): stores, catalog, receive/issue against balances (API covered by `tests/integration/r2.test.ts`).
 
 ## Explicit exclusions
 
@@ -53,4 +54,5 @@ Exercised on `http://127.0.0.1:5173` against the fixture above:
 - No Live/OpenRemote qualification.
 - No Neo 40-case model evaluation (no qualified model).
 - No customer TLS/DNS, capacity, or commercial license approval.
-- Phase 8 / R2 not started.
+- External CMMS bidirectional HTTP adapter not qualified (AC-13 partial).
+- Phase 8 local: parts ledger, CMMS authority mode + exception queue, multi-site reports, `auto_draft_high_priority_request` automation — see `tests/integration/r2.test.ts`.

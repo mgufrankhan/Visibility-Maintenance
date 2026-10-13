@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { M, api } from '../api.ts';
-import { Badge, ErrorBox, Panel, emptyRow, useList } from '../ui.tsx';
+import { Badge, ErrorBox, Panel, emptyRow, useList, PageHeader, Table } from '../ui.tsx'
 
 export function Assets({ siteId }: { siteId: string }) {
   const list = useList<any>(`${M}/asset-profiles?site_id=${siteId}`);
@@ -48,10 +48,10 @@ export function Assets({ siteId }: { siteId: string }) {
 
   return (
     <>
-      <h2>Assets</h2>
+      <PageHeader title="Assets" lede="Maintainable assets from the canonical registry for this site." />
       <p className="muted">Identity comes from the shared registry. Maintenance stores only profiles and business records — never a second equipment master.</p>
       <ErrorBox err={list.err ?? err} />
-      <table>
+      <Table>
         <thead><tr><th>Code</th><th>Name</th><th>Lifecycle</th><th>Criticality</th><th></th></tr></thead>
         <tbody>
           {list.items.map((a) => (
@@ -65,7 +65,7 @@ export function Assets({ siteId }: { siteId: string }) {
           ))}
           {!list.items.length && emptyRow(5, list.loading, 'No assets in this site yet.')}
         </tbody>
-      </table>
+      </Table>
       {selected && (
         <Panel title={`${selected.asset.code} — ${selected.asset.name}`} onClose={() => setSelected(null)}>
           <p className="muted">

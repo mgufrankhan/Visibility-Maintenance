@@ -30,3 +30,6 @@ export * from './meters.ts';
 export * from './conditions.ts';
 export * from './ingestion.ts';
 export * from './neo.ts';
+export * from './parts.ts';
+export * from './authority.ts';
+export * from './automation.ts';

@@ -6,6 +6,7 @@ coverage/
 .env
 .env.*
 !.env.example
+.dev/
 /var/
 /deploy/private/data/
 /deploy/private/secrets/
