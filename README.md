@@ -36,6 +36,7 @@ These are proposed specifications, not evidence that code, connectors or tests a
 | docs/10_IMPLEMENTATION_BACKLOG.md | Ordered implementation phases and completion gates |
 | docs/11_REPOSITORY_AND_ENGINEERING_GUIDE.md | Suggested layout, coding boundaries and checks |
 | docs/12_DECISIONS_AND_DISCOVERY.md | Proposed defaults and unresolved customer decisions |
+| docs/15_REMBERG_SHOP_FLOOR.md | Shop-floor capabilities to take from remberg, and phases S0–S5 |
 | CODEX_START_PROMPT.md | Copyable instruction for starting implementation |
 
 ## Precedence and release rules

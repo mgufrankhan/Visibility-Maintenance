@@ -19,6 +19,13 @@ Decisions below are proposed implementation defaults derived from the PRD. Recor
 | D13 | Private model/runtime choice | Open until hardware and evaluation evidence exist |
 | D14 | Mobile client/cache protection | Open; choose supported implementation after security and device review |
 | D15 | Asset consolidation strategy | Open per existing installation; preserve history and QR aliases |
+| D36 | Shop-floor adoption is a follow-on plan | Proposed; `docs/15_REMBERG_SHOP_FLOOR.md`; does not reopen phases 0–9 |
+| D37 | Briefing and capture are review-first | Proposed; deterministic briefing works with Neo absent |
+| D38 | Planning board uses the fixed lifecycle | Proposed; schedule edits follow current reapproval rules |
+| D39 | Signature and conditional steps freeze on the issued snapshot | Proposed; hidden steps are not required |
+| D40 | Parts readiness warns by default | Proposed; no purchase or ERP goods issue in this plan |
+| D41 | Completion-relative recurrence waits on a written rule | Proposed; rule text is in docs/15 S5 |
+| D42 | Directory sign-in stays blocked with D08 | Proposed; no IdP without a customer directory |
 
 ## Discovery outputs
 
@@ -70,6 +77,22 @@ Owner for every entry below: implementation team (Codex session). Status "Adopte
 | D26 | docs/08 monitoring; health detail exposes operational state | `/health/ready` stays public and depends only on core components. `/health/details` requires a tenant administrator (`maintenance.settings.manage`) or the configured `MONITORING_TOKEN`, and returns counts and ages only | Avoids leaking operational detail while supporting an external monitor. In multi-tenant hosting, details are installation-wide and must be restricted to operators | `tests/integration/operations.test.ts` | Adopted |
 | D27 | docs/11 pin reviewed dependency versions; docs/08 protected secret references | One server image (bundled with esbuild, Postgres 17 client for backups) runs platform, API, worker and tools; nginx serves the SPA and proxies both APIs from one origin. Base images are pinned by digest. Secrets are files mounted as Compose secrets and read through `*_FILE` variables. `tools/sign-release.sh` builds digests, image archives, and an optional cosign-signed bundle | Release images do not need sources or dev dependencies. Cosign signing requires an operator key; customer registry push remains site-owned | Compose build and run on Docker Desktop; `npm run release:bundle` | Adopted |
 | D28 | D13 open; no qualified local or cloud model | Neo uses a deterministic retrieval runtime (`deterministic-retrieval-v1`). `private_only` never calls a remote model. `cloud_permitted` is accepted as config but still does not call cloud because no model is qualified. Drafts persist as bound recommendations; the proposer cannot decide them | 40-case engineer-reviewed evaluation remains blocked | `tests/unit/neo.test.ts`, `tests/integration/neo.test.ts` | Adopted as interim; model qualification blocked |
+
+### Shop-floor adoption register (22 October 2026)
+
+Owner: product + implementation. Status “Proposed” means documented as a follow-on plan; no S1 code is implemented. Full plan: `docs/15_REMBERG_SHOP_FLOOR.md`.
+
+| ID | Evidence | Choice | Rationale and impact | Tests | Status |
+| --- | --- | --- | --- | --- | --- |
+| D36 | remberg public CMMS compared with phases 0–8 and the PRD | Include the shop-floor list in docs/15; leave cloud-only hosting, other product lines, custom statuses, an open agent builder, floor plans, a required native app and capital planning outside this plan | Adds technician capture and planning without reopening Core or phase 9 | n/a (docs) | Proposed |
+| D37 | D09 Core without Neo; D28 deterministic runtime; Neo drafts are recommendations | Briefing pack is deterministic. Narrative, field split, transcript and translation are recommendations. No transcript or translation is invented without a qualified runtime | Assignment, request text and work execution stay usable with Neo off | Deferred until S2 | Proposed |
+| D38 | PRD work-order lifecycle; material schedule changes require reapproval | The board writes `planned_start` and `planned_end` through the current patch. It adds no state | Avoids a second, unaudited status model | Deferred until S1 | Proposed |
+| D39 | Existing `acknowledgment` checks and immutable procedure snapshots | A required signature binds signer, time and snapshot hash. `visible_when` on a check freezes in the snapshot. Hidden checks are not required. A failed visible mandatory check still opens one request | Completion evidence stays traceable after a procedure edit | Deferred until S1 | Proposed |
+| D40 | Phase 8 parts ledger; PM generation already records generation issues | Shortage is visible. `pm_block_on_shortage` defaults off. This plan posts no purchase and no ERP goods issue | Planned work is not stopped by stock unless an administrator says so | Deferred until S3 | Proposed |
+| D41 | PRD defers completion-relative schedules until semantics exist | Adopt or revise the S5 rule before code. Calendar and meter triggers stay as they are | One open occurrence and month-end behavior stay defined | Deferred until S5 entry | Proposed |
+| D42 | D08 external authorization-code flow is not implemented | Directory sign-in waits for a customer IdP. Local accounts remain | Matches the existing blocked gate | Deferred until a directory exists | Proposed |
+
+Open pilot questions (need owners): working languages, which procedures require a signature, and whether multi-asset shutdowns are in the first pilot — listed in docs/15 S0.
 
 ### Phase plan
 

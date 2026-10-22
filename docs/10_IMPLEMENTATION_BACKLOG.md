@@ -14,6 +14,8 @@ Phases express dependency order, not calendar promises. Split tasks into reviewa
 | 7 Neo assistance | Scoped retrieval, citations, read tools, drafts, approvals and runtime policy | Reviewed 40-case evaluation and no forbidden actions |
 | 8 R2 expansion | Parts ledger, CMMS authority, multi-site reporting and optional approved automation | R2 requirements and field conflict qualification |
 
+Shop-floor capabilities taken from remberg are a separate follow-on, phases S0–S5 in `docs/15_REMBERG_SHOP_FLOOR.md`. They start from the local phase 0–8 baseline. They do not renumber phases 0–9, and they do not block docs/09, connector qualification, the Neo evaluation or phase 9. Decisions D36–D42 live in `docs/12_DECISIONS_AND_DISCOVERY.md`.
+
 ## Slice acceptance
 
 Phase 1 includes durable asset creation, not a sample asset array. Phase 2 includes server-side state checks, not only disabled buttons. Phase 3 includes recoverable jobs, not browser timers. Phase 4 shows real missing-data coverage. Phase 5 proves Core has no Live license or application dependency.

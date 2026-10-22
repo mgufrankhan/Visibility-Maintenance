@@ -26,7 +26,7 @@ npm run openapi          # Zod → docs/generated/openapi.json + events.schema.j
 npm run release:bundle   # image digests + optional cosign-signed tarball (needs Docker)
 ```
 
-Leave Live/OpenRemote qualification, Neo 40-case model eval, external IdP, customer TLS/DNS, commercial license terms, and external CMMS HTTP sync blocked until owners or credentials exist (see `docs/13_COMPLETION_REPORT.md`).
+Leave Live/OpenRemote qualification, Neo 40-case model eval, external IdP, customer TLS/DNS, commercial license terms, and external CMMS HTTP sync blocked until owners or credentials exist (see `docs/13_COMPLETION_REPORT.md`). Shop-floor features taken from remberg follow `docs/15_REMBERG_SHOP_FLOOR.md` (S0–S5) and do not change the fixed work-order lifecycle, the Neo allowlist, or Core independence.
 
 ## Boundaries
 
