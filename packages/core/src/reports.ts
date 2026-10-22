@@ -188,7 +188,7 @@ async function pmCompliance(s: Services, sc: Scope) {
   const { rows } = await s.db.query(
     `SELECT o.id, o.occurrence_key, o.due_at, o.status, o.work_order_id, w.state, w.closed_at
        FROM maintenance.pm_occurrence o LEFT JOIN maintenance.work_order w ON w.id = o.work_order_id
-      WHERE o.tenant_id = $1 AND o.site_id = $2 AND ($3::uuid IS NULL OR o.asset_id = $3) AND o.due_at >= $4 AND o.due_at < $5 AND o.status <> 'blocked_asset'`,
+      WHERE o.tenant_id = $1 AND o.site_id = $2 AND ($3::uuid IS NULL OR o.asset_id = $3) AND o.due_at >= $4 AND o.due_at < $5 AND o.status NOT IN ('blocked_asset', 'blocked_shortage')`,
     [sc.tenantId, sc.siteId, sc.assetId, sc.from, sc.to],
   );
   const onTime = rows.filter((r) => r.state === 'closed' && r.closed_at <= r.due_at);

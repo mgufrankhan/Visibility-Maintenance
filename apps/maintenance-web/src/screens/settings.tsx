@@ -20,6 +20,7 @@ export function Settings({ siteId, me }: { siteId: string; me: Me | null }) {
   const [shiftStart, setShiftStart] = useState('480');
   const [shiftEnd, setShiftEnd] = useState('960');
   const [languages, setLanguages] = useState('en');
+  const [blockOnShortage, setBlockOnShortage] = useState(false);
 
   const perms = useMemo(() => me?.sites.find((s) => s.site_id === siteId)?.permissions ?? [], [me, siteId]);
 
@@ -29,6 +30,7 @@ export function Settings({ siteId, me }: { siteId: string; me: Me | null }) {
       setSettings(s);
       setPmInitial(s.pm_initial_state ?? 'ready');
       setLanguages((s.working_languages ?? ['en']).join(', '));
+      setBlockOnShortage(Boolean(s.pm_block_on_shortage));
     }).catch(setErr);
   }, [siteId]);
 
@@ -70,7 +72,10 @@ export function Settings({ siteId, me }: { siteId: string; me: Me | null }) {
         method: 'PUT',
         body: JSON.stringify({
           pm_initial_state: pmInitial,
-          ...(shifts ? { shifts } : { working_languages: languages.split(',').map((code) => code.trim()).filter(Boolean) }),
+          ...(shifts ? { shifts } : {
+            working_languages: languages.split(',').map((code) => code.trim()).filter(Boolean),
+            pm_block_on_shortage: blockOnShortage,
+          }),
           record_version: settings.version ?? settings.record_version,
         }),
       });
@@ -140,6 +145,11 @@ export function Settings({ siteId, me }: { siteId: string; me: Me | null }) {
           <input value={languages} onChange={(e) => setLanguages(e.target.value)} placeholder="en, de" />
         </label>
         <p className="muted">Comma-separated codes. A second language shows the translation slot on requests. Saving a shift does not change this list.</p>
+        <label>
+          <input type="checkbox" checked={blockOnShortage} onChange={(e) => setBlockOnShortage(e.target.checked)} />
+          {' '}Block preventive generation when expected parts are short
+        </label>
+        <p className="muted">Off by default. A shortage stays visible on the plan and the order is still created until this is on. Saving a shift does not change it.</p>
         <label>PM initial state
           <select value={pmInitial} onChange={(e) => setPmInitial(e.target.value as typeof pmInitial)}>
             <option value="ready">Ready</option>

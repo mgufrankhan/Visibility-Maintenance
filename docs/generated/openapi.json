@@ -2886,6 +2886,31 @@
                 "type": "null"
               }
             ]
+          },
+          "expected_parts": {
+            "default": [],
+            "maxItems": 40,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "part_id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "quantity": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 1000000
+                }
+              },
+              "required": [
+                "part_id",
+                "quantity"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [
@@ -2898,7 +2923,8 @@
           "lead_days",
           "trigger",
           "effective_from",
-          "effective_to"
+          "effective_to",
+          "expected_parts"
         ],
         "additionalProperties": false,
         "title": "PlanRevision"
@@ -3608,6 +3634,9 @@
               "type": "string",
               "pattern": "^[a-z]{2}(-[A-Z]{2})?$"
             }
+          },
+          "pm_block_on_shortage": {
+            "type": "boolean"
           },
           "record_version": {
             "type": "integer",

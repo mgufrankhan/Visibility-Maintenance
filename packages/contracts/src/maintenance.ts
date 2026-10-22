@@ -46,6 +46,7 @@ export const siteSettingsRequest = z
     holidays: z.array(z.iso.date()).max(400).optional(),
     shifts: z.array(shiftWindow).max(12).optional(),
     working_languages: z.array(z.string().regex(/^[a-z]{2}(-[A-Z]{2})?$/)).min(1).max(8).optional(),
+    pm_block_on_shortage: z.boolean().optional(),
     record_version: z.number().int().positive(),
   })
   .refine((s) => !s.shifts || new Set(s.shifts.map((w) => w.code)).size === s.shifts.length, {
@@ -397,6 +398,11 @@ export const createPlanRequest = z
   })
   .refine((p) => (p.trigger_kind === 'meter') === (p.meter_id !== null), { message: 'Meter plans require meter_id; calendar plans must not set it', path: ['meter_id'] });
 
+export const expectedPart = z.object({
+  part_id: z.uuid(),
+  quantity: z.number().positive().max(1_000_000),
+});
+
 export const planRevisionRequest = z
   .object({
     title: z.string().min(1).max(200),
@@ -409,8 +415,13 @@ export const planRevisionRequest = z
     trigger: planTrigger,
     effective_from: z.iso.date(),
     effective_to: z.iso.date().nullable().default(null),
+    expected_parts: z.array(expectedPart).max(40).default([]),
   })
-  .refine((r) => r.effective_to === null || r.effective_to >= r.effective_from, { message: 'effective_to precedes effective_from', path: ['effective_to'] });
+  .refine((r) => r.effective_to === null || r.effective_to >= r.effective_from, { message: 'effective_to precedes effective_from', path: ['effective_to'] })
+  .refine((r) => new Set(r.expected_parts.map((p) => p.part_id)).size === r.expected_parts.length, {
+    message: 'expected parts must be unique',
+    path: ['expected_parts'],
+  });
 
 export const planStatusRequest = z.object({
   record_version: z.number().int().positive(),

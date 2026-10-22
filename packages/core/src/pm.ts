@@ -8,6 +8,7 @@ import type { z } from 'zod';
 import { requirePermission } from './access.ts';
 import type { Actor, AnyActor, Services, SystemActor } from './context.ts';
 import { identitySnapshot, resolveAsset, siteInfo, type AssetIdentity } from './identity-snapshots.ts';
+import { assertPartsStockedAtSite, expectedPartsOf, shortageText } from './parts-coverage.ts';
 import { issuableRevision } from './procedures.ts';
 import { enqueueEvent, iso, writeAudit } from './records.ts';
 import { nextOccurrences, occurrencesBetween, validateTrigger, type CalendarTrigger, type HolidayRule, type Occurrence } from './recurrence.ts';
@@ -45,6 +46,7 @@ function revisionDto(r: Record<string, any>) {
     trigger: r.trigger as CalendarTrigger | MeterTrigger,
     effective_from: r.effective_from,
     effective_to: r.effective_to,
+    expected_parts: expectedPartsOf(r.expected_parts),
     published_at: iso(r.published_at),
     published_by: r.published_by,
   };
@@ -111,6 +113,7 @@ export async function addPlanRevision(s: Services, actor: Actor, planId: string,
   }
   return withTransaction(s.db, async (tx) => {
     await issuableRevision(tx, p.tenantId, input.procedure_revision_id, plan.site_id);
+    await assertPartsStockedAtSite(tx, p.tenantId, plan.site_id, input.expected_parts);
     const { rows: team } = await tx.query(`SELECT site_id, status FROM maintenance.team WHERE tenant_id = $1 AND id = $2`, [p.tenantId, input.team_id]);
     if (team[0]?.site_id !== plan.site_id || team[0]?.status !== 'active') throw invalid('Owning team must be an active team at this site', { team_id: ['Unknown team for this site'] });
     await tx.query(`SELECT 1 FROM maintenance.pm_plan WHERE id = $1 FOR UPDATE`, [plan.id]);
@@ -118,9 +121,9 @@ export async function addPlanRevision(s: Services, actor: Actor, planId: string,
     const id = randomUUID();
     const { rows } = await tx.query(
       `INSERT INTO maintenance.pm_plan_revision
-         (id, tenant_id, plan_id, revision_no, title, scope, procedure_revision_id, team_id, priority, estimated_minutes, lead_days, trigger, effective_from, effective_to, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *, effective_from::text AS effective_from, effective_to::text AS effective_to`,
-      [id, p.tenantId, plan.id, n[0]!.next, input.title, input.scope, input.procedure_revision_id, input.team_id, input.priority, input.estimated_minutes, input.lead_days, JSON.stringify(input.trigger), input.effective_from, input.effective_to, p.userId],
+         (id, tenant_id, plan_id, revision_no, title, scope, procedure_revision_id, team_id, priority, estimated_minutes, lead_days, trigger, effective_from, effective_to, expected_parts, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *, effective_from::text AS effective_from, effective_to::text AS effective_to`,
+      [id, p.tenantId, plan.id, n[0]!.next, input.title, input.scope, input.procedure_revision_id, input.team_id, input.priority, input.estimated_minutes, input.lead_days, JSON.stringify(input.trigger), input.effective_from, input.effective_to, JSON.stringify(input.expected_parts), p.userId],
     );
     await writeAudit(tx, actor, { siteId: plan.site_id, action: 'plan.revision_drafted', targetType: 'pm_plan', targetId: plan.id, detail: { revision_id: id, revision_no: n[0]!.next } });
     return revisionDto(rows[0]);
@@ -140,6 +143,7 @@ export async function publishPlanRevision(s: Services, actor: Actor, revisionId:
     requirePermission(p, 'maintenance.plan.manage', plan.site_id);
     if (rev.status !== 'draft') throw conflict('revision_not_draft', `Revision is ${rev.status}`);
     await issuableRevision(tx, p.tenantId, rev.procedure_revision_id, plan.site_id);
+    await assertPartsStockedAtSite(tx, p.tenantId, plan.site_id, expectedPartsOf(rev.expected_parts));
     const now = s.clock.now();
     await tx.query(`UPDATE maintenance.pm_plan_revision SET status = 'superseded' WHERE plan_id = $1 AND status = 'published'`, [plan.id]);
     await tx.query(`UPDATE maintenance.pm_plan_revision SET status = 'published', published_by = $2, published_at = $3 WHERE id = $1`, [rev.id, p.userId, now]);
@@ -309,6 +313,9 @@ async function generateForPlan(s: Services, workerId: string, planId: string, as
     }
 
     const settings = await loadSiteSettings(tx, plan.tenant_id, plan.site_id);
+    const expected = expectedPartsOf(rev.expected_parts);
+    const shortage = await shortageText(tx, plan.tenant_id, plan.site_id, expected);
+    if (shortage) sum.issues.push({ plan_id: plan.id, issue: 'shortage' });
     const { rows: openOverdue } = await tx.query(
       `SELECT w.id FROM maintenance.work_order w JOIN maintenance.pm_occurrence o ON o.work_order_id = w.id
         WHERE o.plan_id = $1 AND o.asset_id = $2 AND w.state = ANY($3::text[]) AND w.due_at < $4 LIMIT 1`,
@@ -319,11 +326,14 @@ async function generateForPlan(s: Services, workerId: string, planId: string, as
     const latestOverdue = overdueAtGeneration.at(-1);
 
     for (const o of due) {
-      let status: 'issued' | 'missed' | 'skipped_open_overdue' | 'blocked_asset' = 'issued';
+      let status: 'issued' | 'missed' | 'skipped_open_overdue' | 'blocked_asset' | 'blocked_shortage' = 'issued';
       let reason: string | null = null;
       if (asset.lifecycle !== 'active') {
         status = 'blocked_asset';
         reason = `Asset is ${asset.lifecycle}`;
+      } else if (shortage && settings.pm_block_on_shortage) {
+        status = 'blocked_shortage';
+        reason = shortage;
       } else if (overdueOpen) {
         status = 'skipped_open_overdue';
         reason = 'An earlier occurrence of this plan is still open and overdue';
@@ -334,7 +344,7 @@ async function generateForPlan(s: Services, workerId: string, planId: string, as
       const occId = await insertOccurrence(tx, plan, rev.id, o, status, reason, workerId);
       if (!occId) continue;
       if (status !== 'issued') {
-        if (status === 'blocked_asset') sum.blocked++;
+        if (status === 'blocked_asset' || status === 'blocked_shortage') sum.blocked++;
         else if (status === 'missed') sum.missed++;
         else sum.skipped++;
         continue;
@@ -391,8 +401,8 @@ async function generateForPlan(s: Services, workerId: string, planId: string, as
     const lastDue = due.at(-1)?.dueAt ?? plan.last_occurrence_due_at;
     const next = nextAfter(new Date(Math.max(to.getTime(), lastDue ? lastDue.getTime() + 1 : 0)));
     await tx.query(
-      `UPDATE maintenance.pm_plan SET last_occurrence_due_at = $2, next_generate_at = $3, last_generation_issue = NULL, last_generation_issue_at = NULL WHERE id = $1`,
-      [plan.id, lastDue, next ? new Date(next.dueAt.getTime() - leadMs) : null],
+      `UPDATE maintenance.pm_plan SET last_occurrence_due_at = $2, next_generate_at = $3, last_generation_issue = $4, last_generation_issue_at = $5 WHERE id = $1`,
+      [plan.id, lastDue, next ? new Date(next.dueAt.getTime() - leadMs) : null, shortage, shortage ? now : null],
     );
   });
 }

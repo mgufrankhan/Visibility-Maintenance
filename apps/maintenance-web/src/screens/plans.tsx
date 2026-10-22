@@ -7,6 +7,7 @@ export function Plans({ siteId }: { siteId: string }) {
   const assets = useList<any>(`${M}/asset-profiles?site_id=${siteId}`);
   const teams = useList<any>(`${M}/teams?site_id=${siteId}`);
   const procedures = useList<any>(`${M}/procedures?site_id=${siteId}`);
+  const parts = useList<any>(`${M}/parts`);
   const [selected, setSelected] = useState<any>(null);
   const [preview, setPreview] = useState<Array<{ key: string; due_at: string }>>([]);
   const [err, setErr] = useState<unknown>(null);
@@ -19,6 +20,8 @@ export function Plans({ siteId }: { siteId: string }) {
   const [anchor, setAnchor] = useState('2026-10-13');
   const [timeOfDay, setTimeOfDay] = useState('09:00');
   const [reason, setReason] = useState('Paused from web planner');
+  const [partId, setPartId] = useState('');
+  const [partQty, setPartQty] = useState('1');
 
   const open = async (id: string) => {
     setErr(null);
@@ -49,6 +52,7 @@ export function Plans({ siteId }: { siteId: string }) {
           lead_days: 7,
           trigger: { type: 'calendar', unit, interval: Number(interval), anchor_date: anchor, time_of_day: timeOfDay },
           effective_from: anchor,
+          expected_parts: partId ? [{ part_id: partId, quantity: Number(partQty) }] : [],
         }),
       });
       setSelected(await api(`${M}/plans/${plan.id}`));
@@ -139,6 +143,16 @@ export function Plans({ siteId }: { siteId: string }) {
           <label>Anchor date<input type="date" value={anchor} onChange={(e) => setAnchor(e.target.value)} /></label>
           <label>Time<input value={timeOfDay} onChange={(e) => setTimeOfDay(e.target.value)} pattern="([01]\d|2[0-3]):[0-5]\d" /></label>
         </div>
+        <div className="row">
+          <label>Expected part (optional)
+            <select value={partId} onChange={(e) => setPartId(e.target.value)}>
+              <option value="">None</option>
+              {parts.items.map((p) => <option key={p.id} value={p.id}>{p.sku} — {p.name}</option>)}
+            </select>
+          </label>
+          <label>Quantity<input type="number" min="0.0001" step="any" value={partQty} onChange={(e) => setPartQty(e.target.value)} /></label>
+        </div>
+        <p className="muted">A shortage is shown on the plan. Generation continues unless the site blocks on shortage.</p>
         <button type="submit">Create draft plan + revision</button>
         <ErrorBox err={err} />
       </form>
@@ -171,12 +185,20 @@ export function Plans({ siteId }: { siteId: string }) {
             {(selected.revisions ?? []).map((r: any) => (
               <li key={r.id} className="card">
                 rev {r.revision_no ?? r.id} <Badge state={r.status} />
+                {(r.expected_parts ?? []).length > 0 && <span className="muted"> · expected parts {(r.expected_parts as Array<{ quantity: number }>).map((p) => p.quantity).join(', ')}</span>}
                 <div className="row">
                   {r.status === 'draft' && <button type="button" onClick={() => void publish(r.id)}>Publish</button>}
                   <button type="button" className="secondary" onClick={() => void runPreview(r.id)}>Preview schedule</button>
                 </div>
               </li>
             ))}
+          </ul>
+          <h4>Occurrences</h4>
+          <ul>
+            {(selected.occurrences ?? []).map((o: { id: string; occurrence_key: string; status: string; reason?: string | null }) => (
+              <li key={o.id}>{o.occurrence_key} <Badge state={o.status} /> {o.reason ?? ''}</li>
+            ))}
+            {!(selected.occurrences ?? []).length && <li className="muted">None yet.</li>}
           </ul>
           {preview.length > 0 && (
             <div className="card">

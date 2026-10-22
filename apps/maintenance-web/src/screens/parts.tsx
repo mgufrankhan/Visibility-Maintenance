@@ -110,6 +110,7 @@ export function Parts({ siteId }: { siteId: string }) {
         </form>
       )}
 
+      <p className="muted">Preventive plans compare this balance with their expected parts. A shortage is shown on the plan. Generation continues unless site policy blocks on shortage. This screen does not create a purchase or post a goods issue.</p>
       <Table>
         <thead><tr><th>SKU</th><th>Name</th><th>On hand</th><th>Reserved</th><th>Available</th><th>Unit</th></tr></thead>
         <tbody>

@@ -8,6 +8,7 @@ import type { z } from 'zod';
 import { requirePermission } from './access.ts';
 import type { Actor, Services, SystemActor } from './context.ts';
 import { identitySnapshot, resolveAsset, type AssetIdentity } from './identity-snapshots.ts';
+import { expectedPartsOf, shortageText } from './parts-coverage.ts';
 import { issuableRevision } from './procedures.ts';
 import { enqueueEvent, iso, writeAudit } from './records.ts';
 import { loadSiteSettings } from './settings.ts';
@@ -316,6 +317,12 @@ async function generateMeterPlan(s: Services, workerId: string, planId: string, 
         );
         if (ins[0]) {
           const settings = await loadSiteSettings(tx, plan.tenant_id, plan.site_id);
+          const shortage = await shortageText(tx, plan.tenant_id, plan.site_id, expectedPartsOf(rev.expected_parts));
+          if (shortage && settings.pm_block_on_shortage) {
+            await tx.query(`UPDATE maintenance.pm_occurrence SET status = 'blocked_shortage', reason = $2 WHERE id = $1`, [ins[0].id, shortage]);
+            sum.issues.push({ plan_id: plan.id, issue: 'shortage' });
+          } else {
+          if (shortage) sum.issues.push({ plan_id: plan.id, issue: 'shortage' });
           const wo = await insertWorkOrder(tx, s, system, {
             siteId: plan.site_id,
             type: 'preventive',
@@ -351,12 +358,14 @@ async function generateMeterPlan(s: Services, workerId: string, planId: string, 
             payload: { plan_id: plan.id, occurrence_key: key, due_at: dueAt.toISOString(), work_order_id: wo.id, display_number: wo.display_number, meter_usage: usage, threshold: nextThreshold },
           });
           sum.issued++;
+          }
         }
       // Provisional until the order's completion meter is approved.
       nextThreshold = nextThreshold + trigger.interval;
     }
     await tx.query(`UPDATE maintenance.pm_plan SET meter_next_threshold = $2 WHERE id = $1`, [plan.id, nextThreshold]);
-    await planIssue(tx, plan.id, null, now);
+    const shortage = await shortageText(tx, plan.tenant_id, plan.site_id, expectedPartsOf(rev.expected_parts));
+    await planIssue(tx, plan.id, shortage, now);
   });
 }
 
