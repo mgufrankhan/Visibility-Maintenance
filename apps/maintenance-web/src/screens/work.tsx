@@ -85,6 +85,9 @@ export function WorkOrders({ siteId, timezone }: { siteId: string; timezone: str
   const [stepValues, setStepValues] = useState<Record<string, string>>({});
   const [view, setView] = useState<'list' | 'board'>('list');
   const [dragging, setDragging] = useState<string | null>(null);
+  const [briefing, setBriefing] = useState<any>(null);
+  const [captureSymptom, setCaptureSymptom] = useState('');
+  const [captureNotes, setCaptureNotes] = useState('');
   const [shifts, setShifts] = useState<ShiftWindow[]>([]);
   const [planForm, setPlanForm] = useState({
     procedure_revision_id: '',
@@ -117,6 +120,36 @@ export function WorkOrders({ siteId, timezone }: { siteId: string; timezone: str
         vals[step.key] = existing?.value === true ? 'pass' : existing?.value === false ? 'fail' : String(existing?.value ?? '');
       }
       setStepValues(vals);
+    } catch (e) {
+      setErr(e);
+    }
+  };
+
+  const loadBriefing = async () => {
+    if (!selected?.asset_id) return;
+    setErr(null);
+    try {
+      setBriefing(await api(`${M}/briefings?asset_id=${selected.asset_id}`));
+    } catch (e) {
+      setErr(e);
+    }
+  };
+
+  const saveCapture = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!selected) return;
+    setErr(null);
+    try {
+      await api(`${M}/captures`, {
+        method: 'POST',
+        body: JSON.stringify({
+          site_id: siteId,
+          work_order_id: selected.id,
+          fields: { symptom: captureSymptom || null, notes: captureNotes || null, failure_code: null, cause: null, action: null },
+        }),
+      });
+      setCaptureSymptom('');
+      setCaptureNotes('');
     } catch (e) {
       setErr(e);
     }
@@ -326,6 +359,29 @@ export function WorkOrders({ siteId, timezone }: { siteId: string; timezone: str
         <Panel title={`WO-${selected.display_number} ${selected.title}`} onClose={() => setSelected(null)}>
           <p><Badge state={selected.state} /> v{selected.version}</p>
           <p>{selected.scope}</p>
+          {selected.asset_id && (
+            <div className="card">
+              <h4>Asset briefing</h4>
+              <button type="button" className="secondary" onClick={() => void loadBriefing()}>Load briefing</button>
+              {briefing && (
+                <ul>
+                  <li>Open orders: {(briefing.open_orders ?? []).map((order: { display_number: string }) => order.display_number).join(', ') || 'none'}</li>
+                  <li>Validated failures: {briefing.validated_failure_count ?? 0}</li>
+                  <li>Procedure: {briefing.procedure_revision_id ?? 'none'}</li>
+                  <li>Parts ledger: {briefing.parts?.present ? 'present' : 'absent'}</li>
+                </ul>
+              )}
+            </div>
+          )}
+          {selected.state === 'in_progress' && (
+            <form className="card" onSubmit={(e) => void saveCapture(e)}>
+              <h4>Structured capture</h4>
+              <p className="muted">Marked fields become a review proposal. They do not change this work order.</p>
+              <label>Symptom<input value={captureSymptom} onChange={(e) => setCaptureSymptom(e.target.value)} /></label>
+              <label>Notes<textarea value={captureNotes} onChange={(e) => setCaptureNotes(e.target.value)} /></label>
+              <button type="submit" disabled={!captureSymptom && !captureNotes}>Save capture</button>
+            </form>
+          )}
           {selected.procedure_snapshot && (
             <p className="muted">
               Issued procedure {selected.procedure_snapshot.title} rev {selected.procedure_snapshot.revision_no}

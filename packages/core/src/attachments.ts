@@ -13,6 +13,7 @@ export type AttachmentOwner = 'work_order' | 'request' | 'inspection_result' | '
 
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const DOCUMENT_TYPES = new Set(['application/pdf', 'text/plain', 'text/markdown', 'text/csv']);
+const AUDIO_TYPES = new Set(['audio/wav', 'audio/mpeg', 'audio/webm', 'audio/mp4']);
 
 interface OwnerScope {
   siteId: string;
@@ -93,8 +94,8 @@ export async function createUploadSlot(s: Services, actor: Actor, ownerType: Att
   const p = actor.principal;
   const media = meta.media_type.toLowerCase();
   const isImage = IMAGE_TYPES.has(media);
-  if (!isImage && !DOCUMENT_TYPES.has(media)) {
-    throw invalid('This file type is not accepted', { media_type: ['Accepted: JPEG, PNG, WebP, PDF, plain text, Markdown, CSV'] });
+  if (!isImage && !DOCUMENT_TYPES.has(media) && !AUDIO_TYPES.has(media)) {
+    throw invalid('This file type is not accepted', { media_type: ['Accepted: JPEG, PNG, WebP, PDF, plain text, Markdown, CSV, WAV, MPEG, WebM, MP4 audio'] });
   }
   const limit = isImage ? s.config.maxImageBytes : s.config.maxDocumentBytes;
   if (meta.size_bytes > limit) throw invalid(`File exceeds the ${Math.round(limit / 1024 / 1024)} MiB limit`, { size_bytes: ['Too large'] });
@@ -130,6 +131,14 @@ function sniff(media: string, bytes: Buffer): boolean {
       return bytes.subarray(0, 4).toString('latin1') === 'RIFF' && bytes.subarray(8, 12).toString('latin1') === 'WEBP';
     case 'application/pdf':
       return bytes.subarray(0, 5).toString('latin1') === '%PDF-';
+    case 'audio/wav':
+      return bytes.subarray(0, 4).toString('latin1') === 'RIFF' && bytes.subarray(8, 12).toString('latin1') === 'WAVE';
+    case 'audio/mpeg':
+      return bytes.subarray(0, 3).toString('latin1') === 'ID3' || (bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0);
+    case 'audio/webm':
+      return starts([0x1a, 0x45, 0xdf, 0xa3]);
+    case 'audio/mp4':
+      return bytes.subarray(4, 8).toString('latin1') === 'ftyp';
     default: {
       if (bytes.includes(0)) return false;
       try {

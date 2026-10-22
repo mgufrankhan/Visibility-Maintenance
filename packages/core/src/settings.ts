@@ -18,6 +18,7 @@ export interface SiteSettings {
   holiday_policy: 'none' | 'shift_to_next_working_day';
   holidays: string[];
   shifts: Array<{ code: string; label: string; start_minute: number; end_minute: number }>;
+  working_languages: string[];
   version: number;
 }
 
@@ -39,6 +40,7 @@ export async function loadSiteSettings(db: Queryable, tenantId: string, siteId: 
     holiday_policy: r.holiday_policy,
     holidays: (r.holidays_json as string[]) ?? [],
     shifts: Array.isArray(r.shifts) ? r.shifts : [],
+    working_languages: Array.isArray(r.working_languages) && r.working_languages.length ? r.working_languages : ['en'],
     version: r.version,
   };
 }
@@ -64,9 +66,9 @@ export async function updateSiteSettings(s: Services, actor: Actor, siteId: stri
     await tx.query(
       `UPDATE maintenance.site_settings SET incident_contact_instructions = $3, pm_initial_state = $4, allow_self_approval = $5,
          self_approval_justification = $6, repeat_fault_window_days = $7, holiday_policy = $8, holidays = $9::date[],
-         shifts = $10::jsonb, version = version + 1, updated_at = now(), updated_by = $11
+         shifts = $10::jsonb, working_languages = $11::text[], version = version + 1, updated_at = now(), updated_by = $12
        WHERE tenant_id = $1 AND site_id = $2`,
-      [p.tenantId, siteId, next.incident_contact_instructions, next.pm_initial_state, next.allow_self_approval, next.self_approval_justification, next.repeat_fault_window_days, next.holiday_policy, next.holidays, JSON.stringify(next.shifts ?? []), p.userId],
+      [p.tenantId, siteId, next.incident_contact_instructions, next.pm_initial_state, next.allow_self_approval, next.self_approval_justification, next.repeat_fault_window_days, next.holiday_policy, next.holidays, JSON.stringify(next.shifts ?? []), next.working_languages, p.userId],
     );
     await writeAudit(tx, actor, {
       siteId,

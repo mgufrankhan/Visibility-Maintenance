@@ -41,6 +41,12 @@ export const TOOL_SCHEMAS: Record<NeoToolName, z.ZodType> = {
       .max(100),
     rationale: z.string().min(1).max(4000),
   }),
+  draft_briefing: z.object({
+    site_id: z.uuid(),
+    asset_id: z.uuid(),
+    narrative: z.string().min(1).max(8000),
+    citations: z.array(z.object({ type: z.string().min(1).max(40), id: z.uuid() })).max(100),
+  }),
 };
 
 const FORBIDDEN = new Set(['close_work_order', 'approve_work_order', 'write_plc', 'restart_equipment', 'grant_role', 'clear_interlock']);

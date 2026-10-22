@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { withTransaction, type Queryable } from '@vm/db';
-import { decodeCursor, encodeCursor, type createRequestRequest, type RequestOrigin, type RequestState, type TriageRequest } from '@vm/contracts';
+import { decodeCursor, encodeCursor, type createRequestRequest, type requestTranslationRequest, type RequestOrigin, type RequestState, type TriageRequest } from '@vm/contracts';
 import { can, sitesWith } from '@vm/policy';
 import { AppError, conflict, invalid, notFound, runIdempotent, staleVersion } from '@vm/server-kit';
 import type { z } from 'zod';
@@ -136,7 +136,50 @@ async function requestDto(db: Queryable, actor: Actor, r: Record<string, any>) {
 export async function getRequest(s: Services, actor: Actor, id: string) {
   const { rows } = await s.db.query(`SELECT * FROM maintenance.request WHERE tenant_id = $1 AND id::text = $2`, [actor.principal.tenantId, id]);
   if (!rows[0] || !canSeeRequest(actor, rows[0])) throw notFound('Request');
-  return requestDto(s.db, actor, rows[0]);
+  const dto = await requestDto(s.db, actor, rows[0]);
+  const { rows: translations } = await s.db.query(
+    `SELECT id, target_language, body, created_by, created_at FROM maintenance.request_translation
+      WHERE tenant_id = $1 AND request_id = $2 ORDER BY created_at, id`,
+    [actor.principal.tenantId, rows[0].id],
+  );
+  const settings = await loadSiteSettings(s.db, actor.principal.tenantId, rows[0].site_id);
+  return {
+    ...dto,
+    working_languages: settings.working_languages,
+    translations: translations.map((row) => ({
+      id: row.id,
+      target_language: row.target_language,
+      body: row.body,
+      created_by: row.created_by,
+      created_at: iso(row.created_at),
+    })),
+  };
+}
+
+/** Stores a person's translation beside the request. The submitted description is not replaced. */
+export async function addRequestTranslation(s: Services, actor: Actor, id: string, input: z.infer<typeof requestTranslationRequest>) {
+  const p = actor.principal;
+  return withTransaction(s.db, async (tx) => {
+    const { rows } = await tx.query(`SELECT * FROM maintenance.request WHERE tenant_id = $1 AND id::text = $2 FOR UPDATE`, [p.tenantId, id]);
+    const request = rows[0];
+    if (!request || !canSeeRequest(actor, request)) throw notFound('Request');
+    requirePermission(p, 'maintenance.view', request.site_id);
+    if (request.version !== input.record_version) throw staleVersion(request.version);
+    const settings = await loadSiteSettings(tx, p.tenantId, request.site_id);
+    if (settings.working_languages.length < 2) throw invalid('This site has one working language', { target_language: ['Translation is not used'] });
+    if (!settings.working_languages.includes(input.target_language)) throw invalid('Language is not a working language for this site', { target_language: ['Unknown language'] });
+    const description = request.description as string;
+    const translationId = randomUUID();
+    await tx.query(
+      `INSERT INTO maintenance.request_translation (id, tenant_id, site_id, request_id, target_language, body, created_by, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [translationId, p.tenantId, request.site_id, request.id, input.target_language, input.body, p.userId, s.clock.now()],
+    );
+    await writeAudit(tx, actor, { siteId: request.site_id, action: 'request.translation_added', targetType: 'request', targetId: request.id, detail: { translation_id: translationId, target_language: input.target_language } });
+    const current = await tx.query(`SELECT description FROM maintenance.request WHERE id = $1`, [request.id]);
+    if (current.rows[0]?.description !== description) throw conflict('description_changed', 'The submitted description cannot be replaced by a translation');
+    return { id: translationId, description, target_language: input.target_language, body: input.body };
+  });
 }
 
 export async function listRequests(s: Services, actor: Actor, q: { site_id?: string; state?: RequestState[]; asset_id?: string; mine?: boolean; cursor?: string; limit: number }) {

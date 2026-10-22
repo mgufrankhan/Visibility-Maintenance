@@ -45,12 +45,43 @@ export const siteSettingsRequest = z
     holiday_policy: z.enum(['none', 'shift_to_next_working_day']).optional(),
     holidays: z.array(z.iso.date()).max(400).optional(),
     shifts: z.array(shiftWindow).max(12).optional(),
+    working_languages: z.array(z.string().regex(/^[a-z]{2}(-[A-Z]{2})?$/)).min(1).max(8).optional(),
     record_version: z.number().int().positive(),
   })
   .refine((s) => !s.shifts || new Set(s.shifts.map((w) => w.code)).size === s.shifts.length, {
     message: 'shift codes must be unique',
     path: ['shifts'],
+  })
+  .refine((s) => !s.working_languages || new Set(s.working_languages).size === s.working_languages.length, {
+    message: 'working languages must be unique',
+    path: ['working_languages'],
   });
+
+export const captureFields = z.object({
+  symptom: z.string().max(500).nullable().default(null),
+  failure_code: z.string().max(60).nullable().default(null),
+  cause: z.string().max(2000).nullable().default(null),
+  action: z.string().max(2000).nullable().default(null),
+  notes: z.string().max(5000).nullable().default(null),
+});
+
+export const structuredCaptureRequest = z
+  .object({
+    site_id: z.uuid(),
+    request_id: z.uuid().nullable().default(null),
+    work_order_id: z.uuid().nullable().default(null),
+    text: z.string().max(5000).nullable().default(null),
+    attachment_id: z.uuid().nullable().default(null),
+    fields: captureFields.nullable().default(null),
+  })
+  .refine((v) => Boolean(v.request_id || v.work_order_id), { message: 'A request or work order is required' })
+  .refine((v) => Boolean(v.text || v.attachment_id || v.fields), { message: 'Provide text, an audio attachment, or marked fields' });
+
+export const requestTranslationRequest = z.object({
+  target_language: z.string().regex(/^[a-z]{2}(-[A-Z]{2})?$/),
+  body: z.string().min(1).max(5000),
+  record_version: z.number().int().positive(),
+});
 
 // ---------- Typed checks (procedures and inspections share this schema) ----------
 

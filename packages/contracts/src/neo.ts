@@ -11,6 +11,7 @@ export const NEO_TOOLS = [
   'draft_request',
   'draft_work_order',
   'propose_checklist',
+  'draft_briefing',
 ] as const;
 export type NeoToolName = (typeof NEO_TOOLS)[number];
 
@@ -24,6 +25,8 @@ export const neoAskRequest = z.object({
   draft_work_order: z.boolean().default(false),
   /** When true, persist a checklist proposal for human review (never publishes). */
   propose_checklist: z.boolean().default(false),
+  /** When true, persist a briefing narrative that quotes record ids. It does not assign or close work. */
+  draft_briefing: z.boolean().default(false),
 });
 
 export const recommendationDecisionRequest = z.object({

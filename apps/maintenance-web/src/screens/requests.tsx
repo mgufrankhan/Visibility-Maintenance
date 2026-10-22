@@ -15,6 +15,8 @@ export function Requests({ siteId }: { siteId: string }) {
   const [teamId, setTeamId] = useState('');
   const [rejectReason, setRejectReason] = useState('');
   const [dupId, setDupId] = useState('');
+  const [translationLanguage, setTranslationLanguage] = useState('');
+  const [translationBody, setTranslationBody] = useState('');
 
   const open = async (id: string) => {
     setErr(null);
@@ -100,6 +102,43 @@ export function Requests({ siteId }: { siteId: string }) {
       {selected && (
         <Panel title={`Request ${selected.display_number} — triage`} onClose={() => setSelected(null)}>
           <p>{selected.description}</p>
+          {(selected.working_languages?.length ?? 0) > 1 && (
+            <div className="card">
+              <h4>Translation</h4>
+              <p className="muted">Original description stays as submitted. The slot stays empty until someone enters a translation.</p>
+              {(selected.translations ?? []).map((item: { id: string; target_language: string; body: string }) => (
+                <p key={item.id}><strong>{item.target_language}</strong> {item.body}</p>
+              ))}
+              {!(selected.translations ?? []).length && <p className="muted">No translation yet.</p>}
+              <label>Language
+                <select value={translationLanguage} onChange={(e) => setTranslationLanguage(e.target.value)}>
+                  <option value="">Select</option>
+                  {(selected.working_languages as string[]).map((code) => <option key={code} value={code}>{code}</option>)}
+                </select>
+              </label>
+              <label>Translation<textarea value={translationBody} onChange={(e) => setTranslationBody(e.target.value)} /></label>
+              <button
+                type="button"
+                className="secondary"
+                disabled={!translationLanguage || translationBody.trim().length < 1}
+                onClick={() => void (async () => {
+                  setErr(null);
+                  try {
+                    await api(`${M}/requests/${selected.id}/translations`, {
+                      method: 'POST',
+                      body: JSON.stringify({ target_language: translationLanguage, body: translationBody, record_version: selected.version }),
+                    });
+                    setTranslationBody('');
+                    await open(selected.id);
+                  } catch (e) {
+                    setErr(e);
+                  }
+                })()}
+              >
+                Save translation
+              </button>
+            </div>
+          )}
           <p className="muted">State <Badge state={selected.state} /> · asset {selected.asset_id ?? 'none'} · location {selected.location_text ?? '—'}</p>
           {selected.rejection_reason && <p className="err">Rejected: {selected.rejection_reason}</p>}
           {selected.linked_work_order && <p className="muted">Linked order {selected.linked_work_order.display_number} ({selected.linked_work_order.state})</p>}

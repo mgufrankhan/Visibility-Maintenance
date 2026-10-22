@@ -1,7 +1,10 @@
-import { createRequestRequest, pageQuery, REQUEST_STATES, triageRequest, uuid } from '@vm/contracts';
+import { createRequestRequest, pageQuery, REQUEST_STATES, requestTranslationRequest, structuredCaptureRequest, triageRequest, uuid } from '@vm/contracts';
 import {
   acknowledgeNotification,
+  addRequestTranslation,
+  captureStructuredFields,
   createRequest,
+  getBriefing,
   getRequest,
   listNotifications,
   listOutboxExceptions,
@@ -28,6 +31,14 @@ export function registerRequestRoutes({ app, s, actor }: RouteDeps): void {
   });
   app.get(`${API}/requests`, async (req) => listRequests(s, await actor(req), parse(requestListQuery, req.query)));
   app.get(`${API}/requests/:id`, async (req) => getRequest(s, await actor(req), param(req, 'id')));
+  app.post(`${API}/requests/:id/translations`, async (req, reply) =>
+    reply.status(201).send(await addRequestTranslation(s, await actor(req), param(req, 'id'), parse(requestTranslationRequest, req.body))),
+  );
+  app.get(`${API}/briefings`, async (req) => {
+    const q = parse(z.object({ asset_id: uuid.optional(), work_order_id: uuid.optional() }), req.query);
+    return getBriefing(s, await actor(req), q);
+  });
+  app.post(`${API}/captures`, async (req, reply) => reply.status(201).send(await captureStructuredFields(s, await actor(req), parse(structuredCaptureRequest, req.body))));
   app.post(`${API}/requests/:id/triage`, async (req, reply) => {
     const r = await triage(s, await actor(req), param(req, 'id'), parse(triageRequest, req.body), idempotencyKey(req));
     return reply.status(r.status).send(r.body);

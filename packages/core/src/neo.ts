@@ -8,6 +8,7 @@ import { conflict, forbidden, invalid, notFound, staleVersion } from '@vm/server
 import type { z } from 'zod';
 import { requirePermission } from './access.ts';
 import type { Actor, Services } from './context.ts';
+import { getBriefing } from './briefing.ts';
 import { resolveAsset } from './identity-snapshots.ts';
 import { enqueueEvent, iso, writeAudit } from './records.ts';
 import { insertRequest } from './requests.ts';
@@ -226,16 +227,17 @@ export async function askNeo(s: Services, actor: Actor, input: z.infer<typeof ne
   return withTransaction(s.db, async (tx) => {
     const runId = randomUUID();
     let recommendationId: string | null = null;
-    let actionType: 'draft_request' | 'draft_work_order' | 'propose_checklist' | null = null;
+    let actionType: 'draft_request' | 'draft_work_order' | 'propose_checklist' | 'draft_briefing' | null = null;
     let outcome: 'answered' | 'abstained' | 'drafted' | 'refused' = synthesis.abstain ? 'abstained' : 'answered';
-    const wantsDraft = input.draft_work_order || input.propose_checklist || input.draft_request;
+    const wantsDraft = input.draft_work_order || input.propose_checklist || input.draft_request || input.draft_briefing;
     if (wantsDraft && !synthesis.abstain) {
       requirePermission(p, 'maintenance.neo.draft', input.site_id);
       recommendationId = randomUUID();
       outcome = 'drafted';
       if (input.draft_work_order) actionType = 'draft_work_order';
       else if (input.propose_checklist) actionType = 'propose_checklist';
-      else actionType = 'draft_request';
+      else if (input.draft_request) actionType = 'draft_request';
+      else actionType = 'draft_briefing';
     }
     await tx.query(
       `INSERT INTO maintenance.agent_run
@@ -250,7 +252,16 @@ export async function askNeo(s: Services, actor: Actor, input: z.infer<typeof ne
     );
     if (recommendationId && actionType) {
       let payload: Record<string, unknown>;
-      if (actionType === 'draft_request') {
+      if (actionType === 'draft_briefing') {
+        if (!asset) throw invalid('draft_briefing requires an asset', { asset_id: ['Required'] });
+        const briefing = await getBriefing(s, actor, { asset_id: asset.asset_id });
+        payload = {
+          site_id: input.site_id,
+          asset_id: asset.asset_id,
+          narrative: briefing.citations.map((item) => `${item.type}:${item.id}`).join(' ') || `asset:${asset.asset_id}`,
+          citations: briefing.citations,
+        };
+      } else if (actionType === 'draft_request') {
         if (!asset) throw invalid('draft_request requires an asset', { asset_id: ['Required'] });
         payload = {
           site_id: input.site_id,
@@ -367,7 +378,7 @@ export async function decideRecommendation(s: Services, actor: Actor, id: string
     let workOrderId: string | null = null;
     let checklistProposal: Record<string, unknown> | null = null;
     if (input.decision === 'approve') {
-      const actionType = rec.action_type as 'draft_request' | 'draft_work_order' | 'propose_checklist';
+      const actionType = rec.action_type as 'draft_request' | 'draft_work_order' | 'propose_checklist' | 'draft_briefing' | 'structured_capture' | 'translate_description';
       switch (actionType) {
         case 'draft_request': {
           const payload = rec.action_payload as {
@@ -441,6 +452,10 @@ export async function decideRecommendation(s: Services, actor: Actor, id: string
           checklistProposal = rec.action_payload as Record<string, unknown>;
           break;
         }
+        case 'draft_briefing':
+        case 'structured_capture':
+        case 'translate_description':
+          break;
         default: {
           const _never: never = actionType;
           throw invalid(`Unsupported Neo action ${_never}`);

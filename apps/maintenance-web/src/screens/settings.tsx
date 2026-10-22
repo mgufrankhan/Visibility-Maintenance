@@ -19,6 +19,7 @@ export function Settings({ siteId, me }: { siteId: string; me: Me | null }) {
   const [shiftLabel, setShiftLabel] = useState('Day');
   const [shiftStart, setShiftStart] = useState('480');
   const [shiftEnd, setShiftEnd] = useState('960');
+  const [languages, setLanguages] = useState('en');
 
   const perms = useMemo(() => me?.sites.find((s) => s.site_id === siteId)?.permissions ?? [], [me, siteId]);
 
@@ -27,6 +28,7 @@ export function Settings({ siteId, me }: { siteId: string; me: Me | null }) {
     api(`${M}/sites/${siteId}/settings`).then((s: any) => {
       setSettings(s);
       setPmInitial(s.pm_initial_state ?? 'ready');
+      setLanguages((s.working_languages ?? ['en']).join(', '));
     }).catch(setErr);
   }, [siteId]);
 
@@ -68,7 +70,7 @@ export function Settings({ siteId, me }: { siteId: string; me: Me | null }) {
         method: 'PUT',
         body: JSON.stringify({
           pm_initial_state: pmInitial,
-          ...(shifts ? { shifts } : {}),
+          ...(shifts ? { shifts } : { working_languages: languages.split(',').map((code) => code.trim()).filter(Boolean) }),
           record_version: settings.version ?? settings.record_version,
         }),
       });
@@ -134,6 +136,10 @@ export function Settings({ siteId, me }: { siteId: string; me: Me | null }) {
       </div>
       <form className="card" onSubmit={(e) => void saveSettings(e, false)}>
         <h3>Site policy</h3>
+        <label>Working languages
+          <input value={languages} onChange={(e) => setLanguages(e.target.value)} placeholder="en, de" />
+        </label>
+        <p className="muted">Comma-separated codes. A second language shows the translation slot on requests. Saving a shift does not change this list.</p>
         <label>PM initial state
           <select value={pmInitial} onChange={(e) => setPmInitial(e.target.value as typeof pmInitial)}>
             <option value="ready">Ready</option>

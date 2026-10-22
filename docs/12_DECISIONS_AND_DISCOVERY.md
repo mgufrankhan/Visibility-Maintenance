@@ -80,14 +80,14 @@ Owner for every entry below: implementation team (Codex session). Status "Adopte
 
 ### Shop-floor adoption register (22 October 2026)
 
-Owner: product + implementation. Status “Proposed” means documented as a follow-on plan; no S1 code is implemented. Full plan: `docs/15_REMBERG_SHOP_FLOOR.md`.
+Owner: product + implementation. S1 and S2 are in code while these decisions stay proposed. Full plan: `docs/15_REMBERG_SHOP_FLOOR.md`.
 
 | ID | Evidence | Choice | Rationale and impact | Tests | Status |
 | --- | --- | --- | --- | --- | --- |
 | D36 | remberg public CMMS compared with phases 0–8 and the PRD | Include the shop-floor list in docs/15; leave cloud-only hosting, other product lines, custom statuses, an open agent builder, floor plans, a required native app and capital planning outside this plan | Adds technician capture and planning without reopening Core or phase 9 | n/a (docs) | Proposed |
-| D37 | D09 Core without Neo; D28 deterministic runtime; Neo drafts are recommendations | Briefing pack is deterministic. Narrative, field split, transcript and translation are recommendations. No transcript or translation is invented without a qualified runtime | Assignment, request text and work execution stay usable with Neo off | Deferred until S2 | Proposed |
-| D38 | PRD work-order lifecycle; material schedule changes require reapproval | The board writes `planned_start` and `planned_end` through the current patch. It adds no state | Avoids a second, unaudited status model | Deferred until S1 | Proposed |
-| D39 | Existing `acknowledgment` checks and immutable procedure snapshots | A required signature binds signer, time and snapshot hash. `visible_when` on a check freezes in the snapshot. Hidden checks are not required. A failed visible mandatory check still opens one request | Completion evidence stays traceable after a procedure edit | Deferred until S1 | Proposed |
+| D37 | D09 Core without Neo; D28 deterministic runtime; Neo drafts are recommendations | Briefing pack is deterministic. Narrative, field split, transcript and translation are recommendations. No transcript or translation is invented without a qualified runtime | Assignment, request text and work execution stay usable with Neo off | `tests/integration/shop-floor-s2.test.ts` | Proposed |
+| D38 | PRD work-order lifecycle; material schedule changes require reapproval | The board writes `planned_start` and `planned_end` through the current patch. It adds no state | Avoids a second, unaudited status model | `tests/integration/shop-floor.test.ts` | Proposed |
+| D39 | Existing `acknowledgment` checks and immutable procedure snapshots | A required signature binds signer, time and snapshot hash. `visible_when` on a check freezes in the snapshot. Hidden checks are not required. A failed visible mandatory check still opens one request | Completion evidence stays traceable after a procedure edit | `tests/integration/shop-floor.test.ts` | Proposed |
 | D40 | Phase 8 parts ledger; PM generation already records generation issues | Shortage is visible. `pm_block_on_shortage` defaults off. This plan posts no purchase and no ERP goods issue | Planned work is not stopped by stock unless an administrator says so | Deferred until S3 | Proposed |
 | D41 | PRD defers completion-relative schedules until semantics exist | Adopt or revise the S5 rule before code. Calendar and meter triggers stay as they are | One open occurrence and month-end behavior stay defined | Deferred until S5 entry | Proposed |
 | D42 | D08 external authorization-code flow is not implemented | Directory sign-in waits for a customer IdP. Local accounts remain | Matches the existing blocked gate | Deferred until a directory exists | Proposed |
