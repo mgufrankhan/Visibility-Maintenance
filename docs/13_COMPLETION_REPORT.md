@@ -19,7 +19,7 @@ Date: 13 October 2026. This is an engineering status report for the Codex implem
 | Neo review tools | Done | `draft_work_order`, `propose_checklist` (review-only; no model) |
 | Release ops | Done locally | `tools/sign-release.sh` digests + optional cosign; optional `BLOB_STORE=s3` |
 | 8 R2 | Done locally | Parts ledger, CMMS authority + exception queue, multi-site reports, approved auto-draft automation; external CMMS HTTP adapter not qualified |
-| Shop-floor adoption S0–S5 | S3 implemented | S1–S2 plus parts readiness that warns by default and blocks a PM occurrence only when the site policy is on. S4–S5 not started. Decisions D36–D42 remain proposed. S5 directory sign-in stays blocked with external IdP |
+| Shop-floor adoption S0–S5 | S4 implemented | S1–S3 plus a shutdown parent that coordinates asset children. The parent adds no labor, evidence or downtime, and it cannot close while a child is open. S5 not started. Decisions D36–D42 remain proposed. S5 directory sign-in stays blocked with external IdP |
 
 ## Executable commands
 

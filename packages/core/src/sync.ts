@@ -9,6 +9,7 @@ import { iso } from './records.ts';
 import { createRequest } from './requests.ts';
 import { getWorkOrder, signWorkOrder, transitionWorkOrder, workOrderDto } from './work-orders.ts';
 
+/** Assigned child orders stay in this queue. Creating a shutdown, linking a child, and editing its schedule stay on the server. */
 export const SYNC_OPERATION_TYPES = ['task_results', 'labor', 'comment', 'transition', 'request', 'downtime', 'completion_signature'] as const;
 export type SyncOperationType = (typeof SYNC_OPERATION_TYPES)[number];
 

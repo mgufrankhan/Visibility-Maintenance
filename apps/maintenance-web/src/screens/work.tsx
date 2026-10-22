@@ -89,6 +89,10 @@ export function WorkOrders({ siteId, timezone }: { siteId: string; timezone: str
   const [captureSymptom, setCaptureSymptom] = useState('');
   const [captureNotes, setCaptureNotes] = useState('');
   const [shifts, setShifts] = useState<ShiftWindow[]>([]);
+  const [childId, setChildId] = useState('');
+  const [shutdownTitle, setShutdownTitle] = useState('Planned shutdown');
+  const [shutdownTeam, setShutdownTeam] = useState('');
+  const teams = useList<any>(`${M}/teams?site_id=${siteId}`);
   const [planForm, setPlanForm] = useState({
     procedure_revision_id: '',
     planned_start: '',
@@ -191,7 +195,7 @@ export function WorkOrders({ siteId, timezone }: { siteId: string; timezone: str
         body: JSON.stringify({
           action,
           record_version: selected.version,
-          reason: action === 'cancel' || action === 'return_for_rework' || action === 'hold' ? (extra.reason as string) ?? 'Action from web' : null,
+          reason: action === 'cancel' || action === 'return_for_rework' || action === 'hold' || action === 'reopen' ? (extra.reason as string) ?? 'Action from web' : null,
           ...extra,
         }),
       });
@@ -304,6 +308,45 @@ export function WorkOrders({ siteId, timezone }: { siteId: string; timezone: str
     }
   };
 
+  const createShutdown = async (e: FormEvent) => {
+    e.preventDefault();
+    setErr(null);
+    try {
+      const created = await api<{ id: string }>(`${M}/work-orders`, {
+        method: 'POST',
+        body: JSON.stringify({
+          site_id: siteId,
+          title: shutdownTitle,
+          type: 'inspection',
+          priority: 'normal',
+          team_id: shutdownTeam,
+          scope: 'Coordinate the shutdown. Each asset keeps its own order.',
+          asset_id: null,
+          non_asset_category: 'shutdown',
+          non_asset_justification: 'Planned stop across more than one asset',
+        }),
+      });
+      list.reload();
+      await open(created.id);
+    } catch (e) {
+      setErr(e);
+    }
+  };
+
+  const linkChild = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!selected || !childId.trim()) return;
+    setErr(null);
+    try {
+      await api(`${M}/work-orders/${selected.id}/children`, { method: 'POST', body: JSON.stringify({ work_order_id: childId.trim() }) });
+      setChildId('');
+      await open(selected.id);
+      list.reload();
+    } catch (e) {
+      setErr(e);
+    }
+  };
+
   const onPhoto = async (file: File | null, stepKey?: string) => {
     if (!file || !selected) return;
     setErr(null);
@@ -327,6 +370,22 @@ export function WorkOrders({ siteId, timezone }: { siteId: string; timezone: str
         }
       />
       <ErrorBox err={list.err ?? err} />
+      {view === 'list' && (
+        <form className="card" onSubmit={(e) => void createShutdown(e)}>
+          <h4>New shutdown</h4>
+          <p className="muted">A coordinating order with no asset. Link one child order per asset afterwards.</p>
+          <div className="row">
+            <label>Title<input value={shutdownTitle} onChange={(e) => setShutdownTitle(e.target.value)} required /></label>
+            <label>Team
+              <select value={shutdownTeam} onChange={(e) => setShutdownTeam(e.target.value)} required>
+                <option value="">—</option>
+                {teams.items.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+              </select>
+            </label>
+          </div>
+          <button type="submit">Create shutdown</button>
+        </form>
+      )}
       {conflict && <p className="err" role="alert">Version conflict: {conflict}. Reloaded the current server state.</p>}
       {view === 'board' && (
         <PlanningBoard
@@ -359,6 +418,20 @@ export function WorkOrders({ siteId, timezone }: { siteId: string; timezone: str
         <Panel title={`WO-${selected.display_number} ${selected.title}`} onClose={() => setSelected(null)}>
           <p><Badge state={selected.state} /> v{selected.version}</p>
           <p>{selected.scope}</p>
+          {selected.non_asset_category === 'shutdown' && !selected.asset_id && (
+            <form className="card" onSubmit={(e) => void linkChild(e)}>
+              <h4>Shutdown children</h4>
+              <p className="muted">Each child keeps its own labor, evidence and downtime. The shutdown cannot close while a child is open.</p>
+              <ul>
+                {(selected.children ?? []).map((child: { id: string; display_number: number; title: string; state: string }) => (
+                  <li key={child.id}>WO-{child.display_number} {child.title} <Badge state={child.state} /></li>
+                ))}
+                {!selected.children?.length && <li className="muted">No children linked</li>}
+              </ul>
+              <label>Child work order id<input value={childId} onChange={(e) => setChildId(e.target.value)} /></label>
+              <button type="submit" disabled={!childId.trim()}>Link child</button>
+            </form>
+          )}
           {selected.asset_id && (
             <div className="card">
               <h4>Asset briefing</h4>
@@ -472,7 +545,7 @@ export function WorkOrders({ siteId, timezone }: { siteId: string; timezone: str
               <button type="submit">Save results</button>
             </form>
           )}
-          <form className="card" onSubmit={(e) => void addLabor(e)}>
+          {!(selected.non_asset_category === 'shutdown' && !selected.asset_id) && <form className="card" onSubmit={(e) => void addLabor(e)}>
             <h4>Labor</h4>
             <div className="row">
               <label>Minutes<input type="number" min={1} value={laborMinutes} onChange={(e) => setLaborMinutes(e.target.value)} /></label>
@@ -480,12 +553,12 @@ export function WorkOrders({ siteId, timezone }: { siteId: string; timezone: str
             </div>
             <button type="submit">Add labor</button>
             <ul>{(selected.labor ?? []).map((l: any) => <li key={l.id}>{l.duration_minutes} min {l.note ?? ''}</li>)}</ul>
-          </form>
-          <div className="card">
+          </form>}
+          {!(selected.non_asset_category === 'shutdown' && !selected.asset_id) && <div className="card">
             <h4>Evidence</h4>
             <label>Photo / document<input type="file" accept="image/*,.pdf,.txt,.md" onChange={(e) => void onPhoto(e.target.files?.[0] ?? null)} /></label>
             <ul>{(selected.attachments ?? []).map((a: any) => <li key={a.id}>{a.file_name} <Badge state={a.status} /></li>)}</ul>
-          </div>
+          </div>}
           <form className="card" onSubmit={(e) => void addComment(e)}>
             <h4>Comments</h4>
             <label>Comment<textarea value={comment} onChange={(e) => setComment(e.target.value)} required /></label>
@@ -500,6 +573,12 @@ export function WorkOrders({ siteId, timezone }: { siteId: string; timezone: str
       )}
     </>
   );
+}
+
+function boardMark(item: { non_asset_category?: string | null; asset_id?: string | null; parent_id?: string | null }): string | null {
+  if (item.non_asset_category === 'shutdown' && !item.asset_id) return 'Shutdown';
+  if (item.parent_id) return 'Shutdown child';
+  return null;
 }
 
 function PlanningBoard({
@@ -540,6 +619,7 @@ function PlanningBoard({
           >
             <button type="button" className="secondary" onClick={() => onOpen(item.id)}>WO-{item.display_number}</button>
             <span>{item.title}</span>
+            {boardMark(item) && <span className="muted">{boardMark(item)}</span>}
             <span className="muted">{item.assignee_id ?? 'team queue'}</span>
           </article>
         ))}
@@ -567,6 +647,7 @@ function PlanningBoard({
                   >
                     <button type="button" className="secondary" onClick={() => onOpen(item.id)}>WO-{item.display_number}</button>
                     <span>{item.title}</span>
+                    {boardMark(item) && <span className="muted">{boardMark(item)}</span>}
                     <span className="muted">{item.assignee_id ?? 'team queue'}</span>
                   </article>
                 ))}
@@ -584,6 +665,7 @@ function PlanningBoard({
               >
                 <button type="button" className="secondary" onClick={() => onOpen(item.id)}>WO-{item.display_number}</button>
                 <span>{item.title}</span>
+                {boardMark(item) && <span className="muted">{boardMark(item)}</span>}
                 <span className="muted">Outside the shift windows</span>
               </article>
             ))}

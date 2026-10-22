@@ -1,6 +1,6 @@
 # What to take from remberg
 
-Status: S1–S3 implemented (parts readiness warns unless the site blocks on shortage). S4–S5 not started. Decisions D36–D42 remain proposed. Date: 23 October 2026.
+Status: S1–S4 implemented (a shutdown parent coordinates asset children). S5 not started. Decisions D36–D42 remain proposed. Date: 23 October 2026.
 
 This document records which public remberg capabilities belong in Visibility Maintenance, which stay outside it, and the order to build the included ones. It does not change the product requirements until a phase below is accepted. Core, Connected Operations, Neo and predictive models keep their existing gates.
 
@@ -174,7 +174,7 @@ Exit: a contracted test provider signs a mapped user into an existing tenant; an
 
 ## 6 Decisions
 
-Proposed until adopted in `docs/12_DECISIONS_AND_DISCOVERY.md`. S1–S3 were implemented against the rules in this document while D36–D40 are still proposed. D41 is accepted at S5 entry before completion-relative code. D42 stays blocked with D08.
+Proposed until adopted in `docs/12_DECISIONS_AND_DISCOVERY.md`. S1–S4 were implemented against the rules in this document while D36–D40 are still proposed. D41 is accepted at S5 entry before completion-relative code. D42 stays blocked with D08.
 
 | ID | Choice |
 | --- | --- |

@@ -8,7 +8,7 @@ import { requirePermission } from './access.ts';
 import type { Actor, Services } from './context.ts';
 import { identitySnapshot, resolveAsset } from './identity-snapshots.ts';
 import { enqueueEvent, iso, writeAudit } from './records.ts';
-import { loadVisibleWorkOrder } from './work-orders.ts';
+import { isShutdownParent, loadVisibleWorkOrder } from './work-orders.ts';
 
 const AMENDABLE = ['started_at', 'restored_at', 'classification', 'validated', 'symptom', 'failure_code', 'production_impact'] as const;
 
@@ -57,6 +57,7 @@ async function emit(tx: Queryable, s: Services, actor: Actor, e: Record<string, 
 
 async function linkToOrder(tx: Queryable, actor: Actor, woId: string, event: Record<string, any>): Promise<void> {
   const wo = await loadVisibleWorkOrder(tx, actor, woId);
+  if (isShutdownParent(wo)) throw conflict('shutdown_parent', 'A shutdown parent does not accept downtime');
   if (wo.site_id !== event.site_id || (wo.asset_id && wo.asset_id !== event.asset_id)) throw invalid('Work order and downtime event must concern the same asset', { work_order_id: ['Different asset or site'] });
   await tx.query(
     `INSERT INTO maintenance.order_failure_link (tenant_id, work_order_id, failure_event_id, linked_by) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,

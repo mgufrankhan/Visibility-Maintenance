@@ -89,6 +89,7 @@ async function recordTransition(
 /**
  * Single insertion path for all work-order origins (manual, triage, PM,
  * inspection follow-up). Callers enforce permissions and entitlements.
+ * parent_id stays null: preventive generation never creates a shutdown or a child link.
  */
 export async function insertWorkOrder(tx: PoolClient, s: Services, actor: AnyActor, w: NewWorkOrder): Promise<Record<string, any>> {
   const tenantId = tenantOf(actor);
@@ -237,6 +238,7 @@ export async function workOrderDto(db: Queryable, actor: Actor, wo: Record<strin
     source_request_id: wo.source_request_id,
     plan_occurrence_id: wo.plan_occurrence_id,
     follow_up_of_id: wo.follow_up_of_id,
+    parent_id: wo.parent_id,
     cycle: wo.cycle,
     observed_symptoms: wo.observed_symptoms,
     failure_code: wo.failure_code,
@@ -286,6 +288,10 @@ export async function getWorkOrder(s: Services, actor: Actor, id: string) {
   const failureLinks = (
     await s.db.query(`SELECT failure_event_id FROM maintenance.order_failure_link WHERE tenant_id = $1 AND work_order_id = $2`, [tenantId, wo.id])
   ).rows.map((x) => x.failure_event_id);
+  const { rows: children } = await s.db.query(
+    `SELECT id, display_number, title, state, asset_id FROM maintenance.work_order WHERE tenant_id = $1 AND parent_id = $2 ORDER BY display_number`,
+    [tenantId, wo.id],
+  );
   return {
     ...(await workOrderDto(s.db, actor, wo, s.clock.now())),
     task_results: [...results.values()].map((r) => ({ id: r.id, step_key: r.step_key, value: r.value, unit: r.unit, passed: r.passed, note: r.note, attachment_ids: r.attachment_ids, recorded_by: r.recorded_by, recorded_at: iso(r.recorded_at), amendment_reason: r.amendment_reason })),
@@ -307,6 +313,7 @@ export async function getWorkOrder(s: Services, actor: Actor, id: string) {
     transitions: transitions.rows,
     closures: closures.rows,
     failure_event_ids: failureLinks,
+    children,
     procedure_snapshot_hash: wo.procedure_snapshot ? procedureSnapshotHash(wo.procedure_snapshot) : null,
     completion_signature: await latestSignature(s.db, tenantId, 'work_order', wo.id, wo.cycle),
   };
@@ -374,7 +381,11 @@ export async function patchWorkOrder(s: Services, actor: Actor, id: string, expe
       if (locked.length) throw conflict('field_locked', `Fields cannot change during execution: ${locked.join(', ')}`);
     }
     if (patch.asset_id !== undefined) {
+      if (isShutdownParent(wo)) throw conflict('shutdown_parent', 'A shutdown parent cannot take an asset');
       if (state !== 'draft' || wo.asset_id !== null) throw conflict('asset_identity_immutable', 'Asset identity can only be set once, on a draft without an asset');
+    }
+    if (isShutdownParent(wo) && patch.non_asset_category !== undefined && patch.non_asset_category !== 'shutdown') {
+      throw conflict('shutdown_parent', 'A shutdown parent keeps its category');
     }
     const next: Record<string, any> = { ...wo };
     if (patch.asset_id) {
@@ -478,6 +489,86 @@ function approvalGaps(wo: Record<string, any>): Record<string, string[]> {
   return gaps;
 }
 
+export function isShutdownParent(wo: { asset_id?: string | null; non_asset_category?: string | null }): boolean {
+  return !wo.asset_id && wo.non_asset_category === 'shutdown';
+}
+
+export async function linkShutdownChild(s: Services, actor: Actor, parentId: string, childId: string) {
+  const p = actor.principal;
+  return withTransaction(s.db, async (tx) => {
+    const parent = await loadVisible(tx, actor, parentId, true);
+    requirePermission(p, 'maintenance.work_order.edit', parent.site_id);
+    await assertNativeFieldMutable(s, actor, parent.site_id, parent.id, ['parent_id']);
+    if (!isShutdownParent(parent)) throw invalid('Only a shutdown order without an asset can be a parent', { parent_id: ['Not a shutdown'] });
+    const { rows: found } = await tx.query(`SELECT * FROM maintenance.work_order WHERE tenant_id = $1 AND id = $2 FOR UPDATE`, [p.tenantId, childId]);
+    const child = found[0];
+    if (!child) throw notFound('Work order');
+    if (child.site_id !== parent.site_id) throw invalid('A child order must be at the same site as the shutdown', { work_order_id: ['Different site'] });
+    if (!can(p, 'maintenance.view', child.site_id)) throw notFound('Work order');
+    if (child.id === parent.id) throw invalid('An order cannot be its own parent', { work_order_id: ['Same order'] });
+    if (!child.asset_id) throw invalid('A shutdown child must name one asset', { work_order_id: ['Asset required'] });
+    if (isShutdownParent(child)) throw invalid('A shutdown order cannot be a child', { work_order_id: ['Not an asset order'] });
+    if (child.parent_id === parent.id) return { status: 200, body: { work_order_id: child.id, parent_id: parent.id, version: child.version } };
+    if (child.parent_id) {
+      const { rows: current } = await tx.query(`SELECT state FROM maintenance.work_order WHERE tenant_id = $1 AND id = $2`, [p.tenantId, child.parent_id]);
+      if (current[0]?.state !== 'cancelled') throw conflict('already_linked', 'Cancel the current shutdown or unlink the child before linking another parent');
+    }
+    const now = s.clock.now();
+    const { rows } = await tx.query(
+      `UPDATE maintenance.work_order SET parent_id = $3, version = version + 1, change_seq = nextval('maintenance.change_seq'), updated_at = $4, updated_by = $5
+       WHERE id = $1 AND tenant_id = $2 RETURNING id, version`,
+      [child.id, p.tenantId, parent.id, now, p.userId],
+    );
+    await writeAudit(tx, actor, { siteId: parent.site_id, action: 'work_order.child_linked', targetType: 'work_order', targetId: parent.id, beforeVersion: child.version, afterVersion: rows[0].version, detail: { child_id: child.id } });
+    return { status: 200, body: { work_order_id: child.id, parent_id: parent.id, version: rows[0].version } };
+  });
+}
+
+export async function unlinkShutdownChild(s: Services, actor: Actor, parentId: string, childId: string) {
+  const p = actor.principal;
+  return withTransaction(s.db, async (tx) => {
+    const parent = await loadVisible(tx, actor, parentId, true);
+    requirePermission(p, 'maintenance.work_order.edit', parent.site_id);
+    const child = await loadVisible(tx, actor, childId, true);
+    if (child.parent_id !== parent.id) throw notFound('Work order');
+    const now = s.clock.now();
+    const { rows } = await tx.query(
+      `UPDATE maintenance.work_order SET parent_id = NULL, version = version + 1, change_seq = nextval('maintenance.change_seq'), updated_at = $3, updated_by = $4
+       WHERE id = $1 AND tenant_id = $2 RETURNING version`,
+      [child.id, p.tenantId, now, p.userId],
+    );
+    await writeAudit(tx, actor, { siteId: parent.site_id, action: 'work_order.child_unlinked', targetType: 'work_order', targetId: parent.id, beforeVersion: child.version, afterVersion: rows[0].version, detail: { child_id: child.id } });
+    return { work_order_id: child.id, parent_id: null, version: rows[0].version };
+  });
+}
+
+async function reopenClosedParent(tx: PoolClient, s: Services, actor: Actor, parentId: string, reason: string, now: Date): Promise<void> {
+  const p = actor.principal;
+  const { rows } = await tx.query(`SELECT * FROM maintenance.work_order WHERE tenant_id = $1 AND id = $2 FOR UPDATE`, [p.tenantId, parentId]);
+  const parent = rows[0];
+  if (!parent || parent.state !== 'closed' || !isShutdownParent(parent)) return;
+  const cycle = parent.cycle + 1;
+  const { rows: updated } = await tx.query(
+    `UPDATE maintenance.work_order SET state = 'in_progress', cycle = $3, closed_by = NULL, closed_at = NULL, closure_outcome = NULL,
+       submitted_by = NULL, submitted_at = NULL, version = version + 1, change_seq = nextval('maintenance.change_seq'), updated_at = $4, updated_by = $5
+     WHERE id = $1 AND tenant_id = $2 RETURNING *`,
+    [parent.id, p.tenantId, cycle, now, p.userId],
+  );
+  const next = updated[0];
+  const detail = { previous_closure: { closed_by: parent.closed_by, closed_at: iso(parent.closed_at), outcome: parent.closure_outcome, cycle: parent.cycle }, cause: 'child_reopened' };
+  await recordTransition(tx, actor, next, { action: 'reopen', from: 'closed', to: 'in_progress', fromVersion: parent.version, toVersion: next.version, reason, detail, at: now });
+  await writeAudit(tx, actor, { siteId: parent.site_id, action: 'work_order.reopen', targetType: 'work_order', targetId: parent.id, beforeVersion: parent.version, afterVersion: next.version, reason, detail });
+  await enqueueEvent(tx, actor, {
+    siteId: parent.site_id,
+    type: 'maintenance.work_order.state_changed',
+    aggregateType: 'work_order',
+    aggregateId: parent.id,
+    aggregateVersion: next.version,
+    occurredAt: now,
+    payload: { work_order_id: parent.id, display_number: parent.display_number, title: parent.title, from: 'closed', to: 'in_progress', action: 'reopen', assignee_id: parent.assignee_id, team_id: parent.team_id, source_request_id: parent.source_request_id },
+  });
+}
+
 export async function transitionWorkOrder(s: Services, actor: Actor, id: string, req: TransitionRequest, key: string | undefined) {
   const p = actor.principal;
   return withTransaction(s.db, async (tx) => {
@@ -573,6 +664,13 @@ export async function transitionWorkOrder(s: Services, actor: Actor, id: string,
           break;
         case 'close': {
           if (!req.closure_outcome) throw invalid('A closure outcome is required', { closure_outcome: ['Required'] });
+          if (isShutdownParent(wo)) {
+            const { rows: openChildren } = await tx.query(
+              `SELECT id FROM maintenance.work_order WHERE tenant_id = $1 AND parent_id = $2 AND state NOT IN ('closed', 'cancelled') LIMIT 1`,
+              [p.tenantId, wo.id],
+            );
+            if (openChildren[0]) throw conflict('children_open', 'Close or cancel every child order before closing the shutdown');
+          }
           let selfApproval = false;
           if (wo.submitted_by === p.userId) {
             const settings = await loadSiteSettings(tx, p.tenantId, wo.site_id);
@@ -592,6 +690,7 @@ export async function transitionWorkOrder(s: Services, actor: Actor, id: string,
         case 'reopen':
           Object.assign(set, { cycle: wo.cycle + 1, closed_by: null, closed_at: null, closure_outcome: null, submitted_by: null, submitted_at: null });
           detail.previous_closure = { closed_by: wo.closed_by, closed_at: iso(wo.closed_at), outcome: wo.closure_outcome, cycle: wo.cycle };
+          if (wo.parent_id) await reopenClosedParent(tx, s, actor, wo.parent_id, reason ?? 'Child reopened', now);
           break;
         case 'cancel':
           set.cancel_reason = reason;

@@ -396,6 +396,49 @@
         }
       }
     },
+    "/api/v1/maintenance/work-orders/{id}/children": {
+      "post": {
+        "summary": "Link an asset order under a shutdown",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "201": {
+            "description": "Created"
+          },
+          "4XX": {
+            "description": "Client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkChild"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/api/v1/maintenance/work-orders/{id}/transitions": {
       "post": {
         "summary": "Transition work order",
@@ -2197,6 +2240,21 @@
         ],
         "additionalProperties": false,
         "title": "CreateWorkOrder"
+      },
+      "LinkChild": {
+        "type": "object",
+        "properties": {
+          "work_order_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": [
+          "work_order_id"
+        ],
+        "additionalProperties": false,
+        "title": "LinkChild"
       },
       "PatchWorkOrder": {
         "type": "object",

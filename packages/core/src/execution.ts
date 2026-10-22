@@ -5,11 +5,10 @@ import { can } from '@vm/policy';
 import { AppError, conflict, forbidden, invalid } from '@vm/server-kit';
 import type { z } from 'zod';
 import { evaluateCheck, isStepVisible } from './checks.ts';
-import { currentResults } from './work-orders.ts';
 import type { Actor, Services } from './context.ts';
 import { requirePermission } from './access.ts';
 import { iso, writeAudit } from './records.ts';
-import { loadVisibleWorkOrder } from './work-orders.ts';
+import { currentResults, isShutdownParent, loadVisibleWorkOrder } from './work-orders.ts';
 
 const EXECUTING = ['in_progress', 'on_hold'];
 const AMENDABLE = ['pending_review', 'closed'];
@@ -145,6 +144,7 @@ export async function addLaborEntry(s: Services, actor: Actor, woId: string, inp
   const p = actor.principal;
   return withTransaction(s.db, async (tx) => {
     const wo = await loadVisibleWorkOrder(tx, actor, woId, true);
+    if (isShutdownParent(wo)) throw conflict('shutdown_parent', 'A shutdown parent does not accept labor');
     const personId = input.person_id ?? p.userId;
     const amending = input.amends_entry_id !== null;
     if (amending) {

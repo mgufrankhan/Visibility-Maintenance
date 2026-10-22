@@ -4,6 +4,7 @@ import {
   completionSignatureRequest,
   createProcedureRequest,
   createWorkOrderRequest,
+  linkChildRequest,
   laborEntryRequest,
   pageQuery,
   patchWorkOrderRequest,
@@ -20,6 +21,7 @@ import {
   createProcedure,
   createWorkOrder,
   getProcedureRevision,
+  linkShutdownChild,
   getWorkOrder,
   grantCheckException,
   listProcedures,
@@ -30,6 +32,7 @@ import {
   setLaborRate,
   signWorkOrder,
   transitionWorkOrder,
+  unlinkShutdownChild,
 } from '@vm/core';
 import { parse } from '@vm/server-kit';
 import { z } from 'zod';
@@ -89,6 +92,14 @@ export function registerWorkRoutes({ app, s, actor }: RouteDeps): void {
     const wo = await patchWorkOrder(s, await actor(req), param(req, 'id'), expectedVersion(req, record_version), patch);
     return reply.header('etag', `"${wo.version}"`).send(wo);
   });
+  app.post(`${API}/work-orders/:id/children`, async (req, reply) => {
+    const body = parse(linkChildRequest, req.body);
+    const r = await linkShutdownChild(s, await actor(req), param(req, 'id'), body.work_order_id);
+    return reply.status(r.status).send(r.body);
+  });
+  app.delete(`${API}/work-orders/:id/children/:childId`, async (req) =>
+    unlinkShutdownChild(s, await actor(req), param(req, 'id'), param(req, 'childId')),
+  );
   app.post(`${API}/work-orders/:id/signature`, async (req) =>
     signWorkOrder(s, await actor(req), param(req, 'id'), parse(completionSignatureRequest, req.body)),
   );

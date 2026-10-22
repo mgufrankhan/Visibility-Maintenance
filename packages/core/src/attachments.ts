@@ -7,6 +7,7 @@ import { AppError, conflict, forbidden, invalid, notFound } from '@vm/server-kit
 import type { z } from 'zod';
 import type { Actor, Services } from './context.ts';
 import { resolveAsset } from './identity-snapshots.ts';
+import { isShutdownParent } from './work-orders.ts';
 import { iso, writeAudit } from './records.ts';
 
 export type AttachmentOwner = 'work_order' | 'request' | 'inspection_result' | 'procedure_revision' | 'asset_document' | 'downtime_event';
@@ -28,9 +29,10 @@ async function authorizeOwner(db: Queryable, s: Services, actor: Actor, type: At
   const t = p.tenantId;
   switch (type) {
     case 'work_order': {
-      const { rows } = await db.query(`SELECT site_id, state, assignee_id FROM maintenance.work_order WHERE tenant_id = $1 AND id::text = $2`, [t, ownerId]);
+      const { rows } = await db.query(`SELECT site_id, state, assignee_id, asset_id, non_asset_category FROM maintenance.work_order WHERE tenant_id = $1 AND id::text = $2`, [t, ownerId]);
       const wo = rows[0];
       if (!wo || !can(p, 'maintenance.view', wo.site_id)) throw notFound('Work order');
+      if (mode === 'write' && isShutdownParent(wo)) throw conflict('shutdown_parent', 'A shutdown parent does not accept evidence');
       if (mode === 'write') {
         const executing = ['in_progress', 'on_hold'].includes(wo.state) && can(p, 'maintenance.work_order.execute', wo.site_id);
         const reviewing = ['pending_review', 'closed'].includes(wo.state) && can(p, 'maintenance.work_order.approve', wo.site_id);

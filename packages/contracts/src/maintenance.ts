@@ -280,6 +280,11 @@ export const createWorkOrderRequest = workOrderDraftFields.extend({
   safety_instructions: z.string().max(10000).nullable().default(null),
 });
 
+/** Links an existing asset order under a shutdown parent. Repeating the same pair is a no-op. */
+export const linkChildRequest = z.object({
+  work_order_id: z.uuid(),
+});
+
 export const patchWorkOrderRequest = z
   .object({
     title: z.string().min(1).max(200),
