@@ -5,6 +5,7 @@ import {
   decodeCursor,
   encodeCursor,
   type CheckDefinition,
+  type CompletionSignatureRequest,
   type createWorkOrderRequest,
   type PatchWorkOrder,
   type TransitionRequest,
@@ -23,6 +24,8 @@ import { assertAssetAcceptsNewWork, identitySnapshot, resolveAsset, type AssetId
 import { issuableRevision, type ProcedureSnapshot } from './procedures.ts';
 import { enqueueEvent, iso, nextDisplayNumber, writeAudit } from './records.ts';
 import { loadSiteSettings } from './settings.ts';
+import { insertSignature, latestSignature } from './signatures.ts';
+import { procedureSnapshotHash } from './snapshot-hash.ts';
 
 const IDEM = 'maintenance.idempotency_key';
 
@@ -304,6 +307,8 @@ export async function getWorkOrder(s: Services, actor: Actor, id: string) {
     transitions: transitions.rows,
     closures: closures.rows,
     failure_event_ids: failureLinks,
+    procedure_snapshot_hash: wo.procedure_snapshot ? procedureSnapshotHash(wo.procedure_snapshot) : null,
+    completion_signature: await latestSignature(s.db, tenantId, 'work_order', wo.id, wo.cycle),
   };
 }
 
@@ -430,6 +435,40 @@ function planningGaps(wo: Record<string, any>): Record<string, string[]> {
   return gaps;
 }
 
+export async function signWorkOrder(s: Services, actor: Actor, id: string, input: CompletionSignatureRequest) {
+  const p = actor.principal;
+  return withTransaction(s.db, async (tx) => {
+    const wo = await loadVisible(tx, actor, id, true);
+    if (wo.version !== input.record_version) throw staleVersion(wo.version);
+    if (!wo.procedure_snapshot?.signature_required) throw conflict('signature_not_required', 'This procedure does not require a completion signature');
+    const executing = wo.assignee_id === p.userId && ['in_progress', 'on_hold'].includes(wo.state);
+    const canAmend = can(p, 'maintenance.work_order.approve', wo.site_id) && ['in_progress', 'on_hold', 'pending_review'].includes(wo.state);
+    if (!executing && !canAmend) throw forbidden('Only the assigned technician can sign, or an approver can amend the signature');
+    if (executing) requirePermission(p, 'maintenance.work_order.execute', wo.site_id);
+    const hash = procedureSnapshotHash(wo.procedure_snapshot);
+    const now = s.clock.now();
+    const signature = await insertSignature(tx, {
+      tenantId: p.tenantId,
+      siteId: wo.site_id,
+      ownerType: 'work_order',
+      ownerId: wo.id,
+      cycle: wo.cycle,
+      signerId: p.userId,
+      signedAt: now,
+      snapshotHash: hash,
+      presentedHash: input.snapshot_hash,
+      clientOpId: input.client_op_id,
+      amendmentReason: input.amendment_reason,
+    });
+    await tx.query(
+      `UPDATE maintenance.work_order SET version = version + 1, change_seq = nextval('maintenance.change_seq'), updated_at = $3, updated_by = $4 WHERE id = $1 AND tenant_id = $2`,
+      [wo.id, p.tenantId, now, p.userId],
+    );
+    await writeAudit(tx, actor, { siteId: wo.site_id, action: 'work_order.signed', targetType: 'work_order', targetId: wo.id, beforeVersion: wo.version, afterVersion: wo.version + 1, reason: input.amendment_reason, detail: { snapshot_hash: hash } });
+    return { signature, version: wo.version + 1, procedure_snapshot_hash: hash };
+  });
+}
+
 function approvalGaps(wo: Record<string, any>): Record<string, string[]> {
   const gaps = planningGaps(wo);
   if (!wo.planned_start || !wo.planned_end) gaps.planned_start = ['Planned start and end dates are required before approval'];
@@ -505,6 +544,13 @@ export async function transitionWorkOrder(s: Services, actor: Actor, id: string,
             requireCause: wo.type === 'corrective' || wo.type === 'follow_up',
             completion,
           });
+          if (wo.procedure_snapshot?.signature_required) {
+            const hash = procedureSnapshotHash(wo.procedure_snapshot);
+            const signature = await latestSignature(tx, p.tenantId, 'work_order', wo.id, wo.cycle);
+            if (!signature || signature.snapshot_hash !== hash) {
+              gaps.push({ field: 'completion.signature', message: 'A completion signature matching the issued procedure is required' });
+            }
+          }
           if (gaps.length) {
             const fe: Record<string, string[]> = {};
             for (const g of gaps) (fe[g.field] ??= []).push(g.message);

@@ -1,6 +1,7 @@
 import {
   checkExceptionRequest,
   commentRequest,
+  completionSignatureRequest,
   createProcedureRequest,
   createWorkOrderRequest,
   laborEntryRequest,
@@ -27,6 +28,7 @@ import {
   publishProcedureRevision,
   recordTaskResults,
   setLaborRate,
+  signWorkOrder,
   transitionWorkOrder,
 } from '@vm/core';
 import { parse } from '@vm/server-kit';
@@ -87,6 +89,9 @@ export function registerWorkRoutes({ app, s, actor }: RouteDeps): void {
     const wo = await patchWorkOrder(s, await actor(req), param(req, 'id'), expectedVersion(req, record_version), patch);
     return reply.header('etag', `"${wo.version}"`).send(wo);
   });
+  app.post(`${API}/work-orders/:id/signature`, async (req) =>
+    signWorkOrder(s, await actor(req), param(req, 'id'), parse(completionSignatureRequest, req.body)),
+  );
   app.post(`${API}/work-orders/:id/transitions`, async (req, reply) => {
     const r = await transitionWorkOrder(s, await actor(req), param(req, 'id'), parse(transitionRequest, req.body), idempotencyKey(req));
     return reply.status(r.status).send(r.body);

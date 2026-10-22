@@ -1,4 +1,5 @@
 import {
+  completionSignatureRequest,
   createInspectionTemplateRequest,
   createPlanRequest,
   inspectionRevisionRequest,
@@ -22,6 +23,7 @@ import {
   publishInspectionTemplate,
   publishPlanRevision,
   setPlanPaused,
+  signInspection,
   startInspection,
   submitInspection,
 } from '@vm/core';
@@ -70,5 +72,8 @@ export function registerPlanningRoutes({ app, s, actor }: RouteDeps): void {
     return reply.status(r.status).send(r.body);
   });
   app.get(`${API}/inspection-results/:id`, async (req) => getInspectionResult(s, await actor(req), param(req, 'id')));
+  app.post(`${API}/inspection-results/:id/signature`, async (req) =>
+    signInspection(s, await actor(req), param(req, 'id'), parse(completionSignatureRequest, req.body)),
+  );
   app.post(`${API}/inspection-results/:id/submit`, async (req) => submitInspection(s, await actor(req), param(req, 'id'), parse(submitInspectionRequest, req.body)));
 }

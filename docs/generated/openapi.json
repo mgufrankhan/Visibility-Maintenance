@@ -348,6 +348,49 @@
         ]
       }
     },
+    "/api/v1/maintenance/work-orders/{id}/signature": {
+      "post": {
+        "summary": "Sign the issued procedure snapshot",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "201": {
+            "description": "Created"
+          },
+          "4XX": {
+            "description": "Client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompletionSignature"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/api/v1/maintenance/work-orders/{id}/labor": {
       "post": {
         "summary": "Add labor",
@@ -593,6 +636,49 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SubmitInspection"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/maintenance/inspection-results/{id}/signature": {
+      "post": {
+        "summary": "Sign the issued inspection snapshot",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "201": {
+            "description": "Created"
+          },
+          "4XX": {
+            "description": "Client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompletionSignature"
               }
             }
           }
@@ -2310,6 +2396,52 @@
         "additionalProperties": false,
         "title": "TransitionRequest"
       },
+      "CompletionSignature": {
+        "type": "object",
+        "properties": {
+          "snapshot_hash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "record_version": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "client_op_id": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "amendment_reason": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "snapshot_hash",
+          "record_version",
+          "client_op_id",
+          "amendment_reason"
+        ],
+        "additionalProperties": false,
+        "title": "CompletionSignature"
+      },
       "LaborEntry": {
         "type": "object",
         "properties": {
@@ -2863,11 +2995,33 @@
               ],
               "additionalProperties": false
             }
+          },
+          "signature": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "snapshot_hash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "required": [
+                  "snapshot_hash"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "observed_at",
-          "values"
+          "values",
+          "signature"
         ],
         "additionalProperties": false,
         "title": "SubmitInspection"
@@ -3318,6 +3472,41 @@
               "type": "string",
               "format": "date",
               "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+            }
+          },
+          "shifts": {
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9_]{1,40}$"
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "start_minute": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1439
+                },
+                "end_minute": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1439
+                }
+              },
+              "required": [
+                "code",
+                "label",
+                "start_minute",
+                "end_minute"
+              ],
+              "additionalProperties": false
             }
           },
           "record_version": {

@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { withTransaction, type Queryable } from '@vm/db';
-import type { CheckDefinition, createInspectionTemplateRequest, inspectionRevisionRequest, startInspectionRequest, submitInspectionRequest } from '@vm/contracts';
+import type { CheckDefinition, CompletionSignatureRequest, createInspectionTemplateRequest, inspectionRevisionRequest, startInspectionRequest, submitInspectionRequest } from '@vm/contracts';
 import { can, canTenantWide, sitesWith } from '@vm/policy';
-import { conflict, forbidden, invalid, notFound } from '@vm/server-kit';
+import { conflict, forbidden, invalid, notFound, staleVersion } from '@vm/server-kit';
 import type { z } from 'zod';
 import { requirePermission } from './access.ts';
-import { evaluateCheck } from './checks.ts';
+import { evaluateCheck, isStepVisible } from './checks.ts';
+import { insertSignature, latestSignature } from './signatures.ts';
+import { inspectionSnapshotHash } from './snapshot-hash.ts';
 import type { Actor, Services } from './context.ts';
 import { identitySnapshot, resolveAsset } from './identity-snapshots.ts';
 import { enqueueEvent, iso, writeAudit } from './records.ts';
@@ -43,8 +45,8 @@ export async function addInspectionRevision(s: Services, actor: Actor, templateI
     const { rows: n } = await tx.query<{ next: number }>(`SELECT coalesce(max(revision_no), 0) + 1 AS next FROM maintenance.inspection_template_revision WHERE template_id = $1`, [t.id]);
     const id = randomUUID();
     await tx.query(
-      `INSERT INTO maintenance.inspection_template_revision (id, tenant_id, template_id, revision_no, instructions, checks, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [id, actor.principal.tenantId, t.id, n[0]!.next, input.instructions, JSON.stringify(input.checks), actor.principal.userId],
+      `INSERT INTO maintenance.inspection_template_revision (id, tenant_id, template_id, revision_no, instructions, checks, signature_required, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [id, actor.principal.tenantId, t.id, n[0]!.next, input.instructions, JSON.stringify(input.checks), input.signature_required, actor.principal.userId],
     );
     await writeAudit(tx, actor, { siteId: t.site_id, action: 'inspection_template.revision_drafted', targetType: 'inspection_template', targetId: t.id, detail: { revision_id: id } });
     return { id, template_id: t.id, revision_no: n[0]!.next, status: 'draft' };
@@ -70,7 +72,7 @@ export async function listInspectionTemplates(s: Services, actor: Actor, siteId?
   const sites = sitesWith(actor.principal, 'maintenance.view').filter((x) => !siteId || x === siteId);
   if (!sites.length) return [];
   const { rows } = await s.db.query(
-    `SELECT t.*, r.id AS revision_id, r.revision_no, r.instructions, r.checks
+    `SELECT t.*, r.id AS revision_id, r.revision_no, r.instructions, r.checks, r.signature_required
        FROM maintenance.inspection_template t
        LEFT JOIN maintenance.inspection_template_revision r ON r.template_id = t.id AND r.status = 'published'
       WHERE t.tenant_id = $1 AND (t.site_id IS NULL OR t.site_id = ANY($2::uuid[])) ORDER BY t.title`,
@@ -82,7 +84,7 @@ export async function listInspectionTemplates(s: Services, actor: Actor, siteId?
     title: r.title,
     asset_type: r.asset_type,
     status: r.status,
-    published_revision: r.revision_id ? { id: r.revision_id, revision_no: r.revision_no, instructions: r.instructions, checks: r.checks as CheckDefinition[] } : null,
+    published_revision: r.revision_id ? { id: r.revision_id, revision_no: r.revision_no, instructions: r.instructions, checks: r.checks as CheckDefinition[], signature_required: r.signature_required === true } : null,
   }));
 }
 
@@ -92,6 +94,8 @@ function resultDto(r: Record<string, any>) {
     site_id: r.site_id,
     template_revision_id: r.template_revision_id,
     checks: r.checks_snapshot as CheckDefinition[],
+    signature_required: r.signature_required === true,
+    snapshot_hash: inspectionSnapshotHash({ template_revision_id: r.template_revision_id, signature_required: r.signature_required === true, checks: r.checks_snapshot }),
     asset_id: r.asset_id,
     asset_snapshot: r.asset_snapshot,
     work_order_id: r.work_order_id,
@@ -134,9 +138,9 @@ export async function startInspection(s: Services, actor: Actor, input: z.infer<
     }
     const id = randomUUID();
     const { rows } = await tx.query(
-      `INSERT INTO maintenance.inspection_result (id, tenant_id, site_id, template_revision_id, checks_snapshot, asset_id, asset_snapshot, work_order_id, submitted_by, client_submission_id, started_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [id, p.tenantId, asset.site_id, rev.id, JSON.stringify(rev.checks), asset.asset_id, JSON.stringify(identitySnapshot(asset)), input.work_order_id, p.userId, input.client_submission_id, s.clock.now()],
+      `INSERT INTO maintenance.inspection_result (id, tenant_id, site_id, template_revision_id, checks_snapshot, signature_required, asset_id, asset_snapshot, work_order_id, submitted_by, client_submission_id, started_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      [id, p.tenantId, asset.site_id, rev.id, JSON.stringify(rev.checks), rev.signature_required === true, asset.asset_id, JSON.stringify(identitySnapshot(asset)), input.work_order_id, p.userId, input.client_submission_id, s.clock.now()],
     );
     return { status: 201, body: resultDto(rows[0]) };
   });
@@ -164,8 +168,14 @@ export async function submitInspection(s: Services, actor: Actor, resultId: stri
     const byKey = new Map(input.values.map((v) => [v.key, v]));
     const errors: Record<string, string[]> = {};
     for (const key of byKey.keys()) if (!checks.some((c) => c.key === key)) errors[`values.${key}`] = ['Check is not part of this inspection revision'];
-    const evaluation: Array<{ key: string; label: string; passed: boolean | null; safety_critical: boolean }> = [];
+    const evaluation: Array<{ key: string; label: string; passed: boolean | null; safety_critical: boolean; not_applicable?: boolean }> = [];
+    const visibility = new Map<string, { passed: boolean | null; note?: string | null }>();
     for (const def of checks) {
+      if (!isStepVisible(def, visibility)) {
+        evaluation.push({ key: def.key, label: def.label, passed: null, safety_critical: def.safety_critical, not_applicable: true });
+        visibility.set(def.key, { passed: null, note: 'not_applicable' });
+        continue;
+      }
       const v = byKey.get(def.key);
       if (!v) {
         if (def.required) errors[`values.${def.key}`] = ['Required'];
@@ -175,10 +185,33 @@ export async function submitInspection(s: Services, actor: Actor, resultId: stri
       if (e.error) errors[`values.${def.key}`] = [e.error];
       else if (def.evidence_required && v.attachment_ids.length === 0) errors[`values.${def.key}`] = ['Evidence is required for this check'];
       evaluation.push({ key: def.key, label: def.label, passed: e.passed, safety_critical: def.safety_critical });
+      visibility.set(def.key, { passed: e.passed, note: v.note });
+    }
+    if (r.signature_required) {
+      const hash = inspectionSnapshotHash({ template_revision_id: r.template_revision_id, signature_required: true, checks });
+      const existing = await latestSignature(tx, p.tenantId, 'inspection_result', r.id, 1);
+      if (input.signature && input.signature.snapshot_hash !== hash) throw conflict('snapshot_hash_mismatch', 'The signature does not match the issued inspection snapshot');
+      if (existing && existing.snapshot_hash !== hash) throw conflict('snapshot_hash_mismatch', 'The stored signature does not match the issued inspection snapshot');
+      if (!existing && !input.signature) errors['signature.snapshot_hash'] = ['A completion signature matching the issued inspection is required'];
+      if (!existing && input.signature && !errors['signature.snapshot_hash']) {
+        await insertSignature(tx, {
+          tenantId: p.tenantId,
+          siteId: r.site_id,
+          ownerType: 'inspection_result',
+          ownerId: r.id,
+          cycle: 1,
+          signerId: p.userId,
+          signedAt: s.clock.now(),
+          snapshotHash: hash,
+          presentedHash: input.signature.snapshot_hash,
+          clientOpId: null,
+          amendmentReason: null,
+        });
+      }
     }
     if (Object.keys(errors).length) throw invalid('Some inspection values are invalid or missing', errors);
 
-    const failed = evaluation.filter((e) => e.passed === false && checks.find((c) => c.key === e.key)!.required);
+    const failed = evaluation.filter((e) => e.passed === false && !e.not_applicable && checks.find((c) => c.key === e.key)!.required);
     const passed = failed.length === 0;
     const observedAt = new Date(input.observed_at);
     let requestId: string | null = null;
@@ -213,13 +246,49 @@ export async function submitInspection(s: Services, actor: Actor, resultId: stri
         payload: { inspection_result_id: r.id, asset_id: r.asset_id, request_id: requestId, failed_checks: failed.map((f) => f.key), summary: summary.join('; ') },
       });
     }
+    const storedValues = [
+      ...input.values.filter((v) => !evaluation.some((e) => e.key === v.key && e.not_applicable)),
+      ...evaluation.filter((e) => e.not_applicable).map((e) => ({ key: e.key, value: null, unit: null, note: 'not_applicable', attachment_ids: [] })),
+    ];
     const { rows: updated } = await tx.query(
       `UPDATE maintenance.inspection_result SET status = 'submitted', observed_at = $2, submitted_at = $3, values = $4, evaluation = $5, passed = $6, request_id = $7, version = version + 1
         WHERE id = $1 RETURNING *`,
-      [r.id, observedAt, s.clock.now(), JSON.stringify(input.values), JSON.stringify(evaluation), passed, requestId],
+      [r.id, observedAt, s.clock.now(), JSON.stringify(storedValues), JSON.stringify(evaluation), passed, requestId],
     );
     await writeAudit(tx, actor, { siteId: r.site_id, action: 'inspection.submitted', targetType: 'inspection_result', targetId: r.id, afterVersion: r.version + 1, detail: { passed, request_id: requestId } });
     return { ...resultDto(updated[0]), replayed: false };
+  });
+}
+
+export async function signInspection(s: Services, actor: Actor, resultId: string, input: CompletionSignatureRequest) {
+  const p = actor.principal;
+  return withTransaction(s.db, async (tx) => {
+    const { rows } = await tx.query(`SELECT * FROM maintenance.inspection_result WHERE tenant_id = $1 AND id::text = $2 FOR UPDATE`, [p.tenantId, resultId]);
+    const r = rows[0];
+    if (!r || !can(p, 'maintenance.view', r.site_id)) throw notFound('Inspection result');
+    if (r.version !== input.record_version) throw staleVersion(r.version);
+    if (r.status !== 'in_progress') throw conflict('record_locked', 'A submitted inspection cannot be signed again');
+    if (!r.signature_required) throw conflict('signature_not_required', 'This inspection does not require a completion signature');
+    if (r.submitted_by !== p.userId) throw forbidden('Only the inspector who started this inspection can sign it');
+    requirePermission(p, 'maintenance.inspection.execute', r.site_id);
+    const hash = inspectionSnapshotHash({ template_revision_id: r.template_revision_id, signature_required: true, checks: r.checks_snapshot });
+    const now = s.clock.now();
+    const signature = await insertSignature(tx, {
+      tenantId: p.tenantId,
+      siteId: r.site_id,
+      ownerType: 'inspection_result',
+      ownerId: r.id,
+      cycle: 1,
+      signerId: p.userId,
+      signedAt: now,
+      snapshotHash: hash,
+      presentedHash: input.snapshot_hash,
+      clientOpId: input.client_op_id,
+      amendmentReason: input.amendment_reason,
+    });
+    await tx.query(`UPDATE maintenance.inspection_result SET version = version + 1 WHERE id = $1`, [r.id]);
+    await writeAudit(tx, actor, { siteId: r.site_id, action: 'inspection.signed', targetType: 'inspection_result', targetId: r.id, beforeVersion: r.version, afterVersion: r.version + 1, detail: { snapshot_hash: hash } });
+    return { signature, version: r.version + 1, snapshot_hash: hash };
   });
 }
 

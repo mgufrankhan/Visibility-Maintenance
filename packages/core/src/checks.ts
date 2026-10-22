@@ -42,12 +42,26 @@ export function evaluateCheck(def: CheckDefinition, v: CheckValue, availableAtta
 export interface CurrentResult {
   step_key: string;
   passed: boolean | null;
+  note?: string | null;
   attachment_ids: string[];
 }
 
 export interface CompletionGap {
   field: string;
   message: string;
+}
+
+/** A step with no rule is always shown. A missing or not-applicable prior result keeps the later step hidden. */
+export function isStepVisible(
+  step: { visible_when?: { key: string; when: 'failed' | 'passed' | 'outside_limits' } | null },
+  results: ReadonlyMap<string, { passed: boolean | null; note?: string | null }>,
+): boolean {
+  const rule = step.visible_when;
+  if (!rule) return true;
+  const prior = results.get(rule.key);
+  if (!prior || prior.note === 'not_applicable' || prior.passed === null || prior.passed === undefined) return false;
+  if (rule.when === 'passed') return prior.passed === true;
+  return prior.passed === false;
 }
 
 /** Explains every reason a completion submission is blocked (MW-05). */
@@ -65,9 +79,11 @@ export function completionGaps(input: {
 }): CompletionGap[] {
   const gaps: CompletionGap[] = [];
   for (const step of input.steps) {
+    if (!isStepVisible(step, input.results)) continue;
     const r = input.results.get(step.key);
     const excepted = input.exceptions.has(step.key);
-    if (!r) {
+    const unanswered = !r || r.passed === null || r.note === 'not_applicable';
+    if (unanswered) {
       if (step.required && !excepted) gaps.push({ field: `steps.${step.key}`, message: `Required check "${step.label}" has no result` });
       continue;
     }

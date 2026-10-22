@@ -189,7 +189,7 @@ export function App() {
           <ErrorBox err={bootError} />
           {queue.length > 0 && <QueueBanner items={queue} onFlush={() => flushQueue(loadQueue)} />}
           {siteId ? (
-            <Screen route={route} siteId={siteId} me={me} online={online} onQueued={loadQueue} />
+            <Screen route={route} siteId={siteId} me={me} online={online} onQueued={loadQueue} timezone={sites.find((s) => s.id === siteId)?.timezone ?? 'UTC'} />
           ) : (
             <div className="card">
               <EmptyState
@@ -284,14 +284,14 @@ async function flushQueue(reload: () => Promise<void>) {
   await reload();
 }
 
-function Screen({ route, siteId, me, online, onQueued }: { route: Route; siteId: string; me: Me | null; online: boolean; onQueued: () => Promise<void> }) {
+function Screen({ route, siteId, me, online, onQueued, timezone }: { route: Route; siteId: string; me: Me | null; online: boolean; onQueued: () => Promise<void>; timezone: string }) {
   switch (route) {
     case 'overview':
       return <Overview siteId={siteId} />;
     case 'requests':
       return <Requests siteId={siteId} />;
     case 'work':
-      return <WorkOrders siteId={siteId} />;
+      return <WorkOrders siteId={siteId} timezone={timezone} />;
     case 'my-work':
       return <MyWork siteId={siteId} online={online} onQueued={onQueued} />;
     case 'pm':

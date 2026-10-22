@@ -9,6 +9,8 @@ export * from './profiles.ts';
 export * from './settings.ts';
 export * from './services.ts';
 export * from './checks.ts';
+export * from './snapshot-hash.ts';
+export * from './signatures.ts';
 export * from './procedures.ts';
 export * from './work-orders.ts';
 export * from './execution.ts';

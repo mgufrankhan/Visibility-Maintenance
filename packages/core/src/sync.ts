@@ -1,14 +1,15 @@
-import { commentRequest, createDowntimeRequest, createRequestRequest, laborEntryRequest, taskResultRequest, transitionRequest } from '@vm/contracts';
+import { commentRequest, completionSignatureRequest, createDowntimeRequest, createRequestRequest, laborEntryRequest, taskResultRequest, transitionRequest } from '@vm/contracts';
 import { AppError, parse } from '@vm/server-kit';
 import { sitesWith } from '@vm/policy';
 import type { Actor, Services } from './context.ts';
 import { createDowntime } from './downtime.ts';
 import { addComment, addLaborEntry, recordTaskResults } from './execution.ts';
+import { getInspectionResult, signInspection } from './inspections.ts';
 import { iso } from './records.ts';
 import { createRequest } from './requests.ts';
-import { getWorkOrder, transitionWorkOrder, workOrderDto } from './work-orders.ts';
+import { getWorkOrder, signWorkOrder, transitionWorkOrder, workOrderDto } from './work-orders.ts';
 
-export const SYNC_OPERATION_TYPES = ['task_results', 'labor', 'comment', 'transition', 'request', 'downtime'] as const;
+export const SYNC_OPERATION_TYPES = ['task_results', 'labor', 'comment', 'transition', 'request', 'downtime', 'completion_signature'] as const;
 export type SyncOperationType = (typeof SYNC_OPERATION_TYPES)[number];
 
 export interface SyncOperation {
@@ -80,6 +81,12 @@ async function execute(s: Services, actor: Actor, op: SyncOperation): Promise<un
       return (await createRequest(s, actor, parse(createRequestRequest, { ...op.payload, client_request_id: op.client_op_id }), undefined)).body;
     case 'downtime':
       return (await createDowntime(s, actor, parse(createDowntimeRequest, { ...op.payload, client_op_id: op.client_op_id }))).body;
+    case 'completion_signature': {
+      if (op.base_version === null) throw new AppError(428, 'precondition_required', 'Offline signatures must carry the record version they were based on');
+      const body = parse(completionSignatureRequest, { ...op.payload, record_version: op.base_version, client_op_id: op.client_op_id });
+      if (op.payload.owner_type === 'inspection_result') return signInspection(s, actor, recordId, body);
+      return signWorkOrder(s, actor, recordId, body);
+    }
     default: {
       const never: never = op.type;
       throw new Error(`Unhandled sync operation ${String(never)}`);
@@ -90,6 +97,7 @@ async function execute(s: Services, actor: Actor, op: SyncOperation): Promise<un
 async function serverRecord(s: Services, actor: Actor, op: SyncOperation): Promise<unknown> {
   if (!op.record_id || op.type === 'request' || op.type === 'downtime') return null;
   try {
+    if (op.type === 'completion_signature' && op.payload.owner_type === 'inspection_result') return await getInspectionResult(s, actor, op.record_id);
     return await getWorkOrder(s, actor, op.record_id);
   } catch {
     return null;

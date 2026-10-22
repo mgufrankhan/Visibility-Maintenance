@@ -19,7 +19,7 @@ Date: 13 October 2026. This is an engineering status report for the Codex implem
 | Neo review tools | Done | `draft_work_order`, `propose_checklist` (review-only; no model) |
 | Release ops | Done locally | `tools/sign-release.sh` digests + optional cosign; optional `BLOB_STORE=s3` |
 | 8 R2 | Done locally | Parts ledger, CMMS authority + exception queue, multi-site reports, approved auto-draft automation; external CMMS HTTP adapter not qualified |
-| Shop-floor adoption S0–S5 | Not started | Plan only: `docs/15_REMBERG_SHOP_FLOOR.md`; decisions D36–D42 proposed. Follow-on to phases 0–8. S5 directory sign-in stays blocked with external IdP |
+| Shop-floor adoption S0–S5 | S1 implemented | MTTA, required signatures, conditional checks and the planning board are in code. S2–S5 not started. Decisions D36–D42 remain proposed. S5 directory sign-in stays blocked with external IdP |
 
 ## Executable commands
 

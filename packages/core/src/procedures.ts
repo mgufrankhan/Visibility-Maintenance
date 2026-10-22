@@ -16,6 +16,7 @@ export interface ProcedureSnapshot {
   safety_instructions: string;
   steps: CheckDefinition[];
   estimated_minutes: number | null;
+  signature_required: boolean;
   published_at: string | null;
 }
 
@@ -52,9 +53,9 @@ export async function addProcedureRevision(s: Services, actor: Actor, procedureI
     const id = randomUUID();
     const revisionNo = n[0]!.next;
     await tx.query(
-      `INSERT INTO maintenance.procedure_revision (id, tenant_id, procedure_id, revision_no, status, summary, safety_instructions, steps, estimated_minutes, created_by)
-       VALUES ($1,$2,$3,$4,'draft',$5,$6,$7,$8,$9)`,
-      [id, actor.principal.tenantId, proc.id, revisionNo, input.summary, input.safety_instructions, JSON.stringify(input.steps), input.estimated_minutes, actor.principal.userId],
+      `INSERT INTO maintenance.procedure_revision (id, tenant_id, procedure_id, revision_no, status, summary, safety_instructions, steps, estimated_minutes, signature_required, created_by)
+       VALUES ($1,$2,$3,$4,'draft',$5,$6,$7,$8,$9,$10)`,
+      [id, actor.principal.tenantId, proc.id, revisionNo, input.summary, input.safety_instructions, JSON.stringify(input.steps), input.estimated_minutes, input.signature_required, actor.principal.userId],
     );
     await writeAudit(tx, actor, { siteId: proc.site_id, action: 'procedure.revision_drafted', targetType: 'procedure_revision', targetId: id, detail: { revision_no: revisionNo } });
     return { id, procedure_id: proc.id, revision_no: revisionNo, status: 'draft' };
@@ -114,6 +115,7 @@ function toSnapshot(r: Record<string, any>): ProcedureSnapshot {
     safety_instructions: r.safety_instructions,
     steps: r.steps,
     estimated_minutes: r.estimated_minutes,
+    signature_required: r.signature_required === true,
     published_at: iso(r.published_at),
   };
 }

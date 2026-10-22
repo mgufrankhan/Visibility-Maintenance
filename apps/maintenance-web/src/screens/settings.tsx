@@ -11,9 +11,14 @@ export function Settings({ siteId, me }: { siteId: string; me: Me | null }) {
   const [teamName, setTeamName] = useState('');
   const [licenseJson, setLicenseJson] = useState('');
   const [procTitle, setProcTitle] = useState('Visual check');
+  const [signatureRequired, setSignatureRequired] = useState(false);
   const [userId, setUserId] = useState('');
   const [role, setRole] = useState('technician');
   const [pmInitial, setPmInitial] = useState<'ready' | 'pending_approval'>('ready');
+  const [shiftCode, setShiftCode] = useState('day');
+  const [shiftLabel, setShiftLabel] = useState('Day');
+  const [shiftStart, setShiftStart] = useState('480');
+  const [shiftEnd, setShiftEnd] = useState('960');
 
   const perms = useMemo(() => me?.sites.find((s) => s.site_id === siteId)?.permissions ?? [], [me, siteId]);
 
@@ -48,14 +53,24 @@ export function Settings({ siteId, me }: { siteId: string; me: Me | null }) {
     }
   };
 
-  const saveSettings = async (e: FormEvent) => {
+  const saveSettings = async (e: FormEvent, includeShift: boolean) => {
     e.preventDefault();
     if (!settings) return;
     setErr(null);
     try {
+      const shifts = includeShift
+        ? [
+            ...(settings.shifts ?? []).filter((s: { code: string }) => s.code !== shiftCode),
+            { code: shiftCode, label: shiftLabel, start_minute: Number(shiftStart), end_minute: Number(shiftEnd) },
+          ]
+        : undefined;
       const next = await api(`${M}/sites/${siteId}/settings`, {
         method: 'PUT',
-        body: JSON.stringify({ pm_initial_state: pmInitial, record_version: settings.version ?? settings.record_version }),
+        body: JSON.stringify({
+          pm_initial_state: pmInitial,
+          ...(shifts ? { shifts } : {}),
+          record_version: settings.version ?? settings.record_version,
+        }),
       });
       setSettings(next);
     } catch (e) {
@@ -84,7 +99,13 @@ export function Settings({ siteId, me }: { siteId: string; me: Me | null }) {
         method: 'POST',
         body: JSON.stringify({
           safety_instructions: 'Wear PPE.',
-          steps: [{ key: 'checked', label: 'Checked', type: 'pass_fail', required: true }],
+          signature_required: signatureRequired,
+          steps: signatureRequired
+            ? [
+                { key: 'gauge', label: 'Reading', type: 'numeric', unit: 'C', min: 0, max: 80, required: false },
+                { key: 'follow', label: 'Follow-up', type: 'pass_fail', required: true, visible_when: { key: 'gauge', when: 'outside_limits' } },
+              ]
+            : [{ key: 'checked', label: 'Checked', type: 'pass_fail', required: true }],
         }),
       });
       await api(`${M}/procedure-revisions/${rev.id}/publish`, { method: 'POST', body: '{}' });
@@ -111,7 +132,7 @@ export function Settings({ siteId, me }: { siteId: string; me: Me | null }) {
         <h3>Your permissions on this site</h3>
         <p className="muted">{perms.join(', ') || 'none'}</p>
       </div>
-      <form className="card" onSubmit={(e) => void saveSettings(e)}>
+      <form className="card" onSubmit={(e) => void saveSettings(e, false)}>
         <h3>Site policy</h3>
         <label>PM initial state
           <select value={pmInitial} onChange={(e) => setPmInitial(e.target.value as typeof pmInitial)}>
@@ -119,7 +140,19 @@ export function Settings({ siteId, me }: { siteId: string; me: Me | null }) {
             <option value="pending_approval">Pending approval</option>
           </select>
         </label>
-        <button type="submit">Save site settings</button>
+        <h4>Shift window</h4>
+        <p className="muted">Used by the work-order planning board. Times are minutes from midnight in the site timezone.</p>
+        <div className="row">
+          <label>Code<input value={shiftCode} onChange={(e) => setShiftCode(e.target.value)} pattern="[a-z0-9_]+" required /></label>
+          <label>Label<input value={shiftLabel} onChange={(e) => setShiftLabel(e.target.value)} required /></label>
+          <label>Start minute<input type="number" min={0} max={1439} value={shiftStart} onChange={(e) => setShiftStart(e.target.value)} required /></label>
+          <label>End minute<input type="number" min={0} max={1439} value={shiftEnd} onChange={(e) => setShiftEnd(e.target.value)} required /></label>
+        </div>
+        <ul>{(settings?.shifts ?? []).map((s: { code: string; label: string; start_minute: number; end_minute: number }) => <li key={s.code}>{s.label} ({s.code}) {s.start_minute}–{s.end_minute}</li>)}</ul>
+        <div className="row">
+          <button type="submit">Save site settings</button>
+          <button type="button" className="secondary" onClick={(e) => void saveSettings(e, true)}>Save shift</button>
+        </div>
       </form>
       <form className="card" onSubmit={(e) => void createTeam(e)}>
         <h3>Teams</h3>
@@ -153,6 +186,7 @@ export function Settings({ siteId, me }: { siteId: string; me: Me | null }) {
       <form className="card" onSubmit={(e) => void createProcedure(e)}>
         <h3>Publish a simple procedure</h3>
         <label>Title<input value={procTitle} onChange={(e) => setProcTitle(e.target.value)} required /></label>
+        <label className="check"><input type="checkbox" checked={signatureRequired} onChange={(e) => setSignatureRequired(e.target.checked)} /> Require a completion signature and a follow-up when the reading is outside limits</label>
         <button type="submit">Create + publish</button>
       </form>
     </>

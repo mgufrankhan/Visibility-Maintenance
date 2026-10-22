@@ -27,21 +27,43 @@ export const roleAssignmentRequest = z.object({
   site_id: z.uuid().nullable().default(null),
 });
 
-export const siteSettingsRequest = z.object({
-  incident_contact_instructions: z.string().max(2000).nullable().optional(),
-  pm_initial_state: z.enum(['ready', 'pending_approval']).optional(),
-  allow_self_approval: z.boolean().optional(),
-  self_approval_justification: z.string().max(1000).nullable().optional(),
-  repeat_fault_window_days: z.number().int().min(1).max(365).optional(),
-  holiday_policy: z.enum(['none', 'shift_to_next_working_day']).optional(),
-  holidays: z.array(z.iso.date()).max(400).optional(),
-  record_version: z.number().int().positive(),
+export const shiftWindow = z.object({
+  code: z.string().regex(/^[a-z0-9_]{1,40}$/),
+  label: z.string().min(1).max(80),
+  start_minute: z.number().int().min(0).max(1439),
+  end_minute: z.number().int().min(0).max(1439),
 });
+export type ShiftWindow = z.infer<typeof shiftWindow>;
+
+export const siteSettingsRequest = z
+  .object({
+    incident_contact_instructions: z.string().max(2000).nullable().optional(),
+    pm_initial_state: z.enum(['ready', 'pending_approval']).optional(),
+    allow_self_approval: z.boolean().optional(),
+    self_approval_justification: z.string().max(1000).nullable().optional(),
+    repeat_fault_window_days: z.number().int().min(1).max(365).optional(),
+    holiday_policy: z.enum(['none', 'shift_to_next_working_day']).optional(),
+    holidays: z.array(z.iso.date()).max(400).optional(),
+    shifts: z.array(shiftWindow).max(12).optional(),
+    record_version: z.number().int().positive(),
+  })
+  .refine((s) => !s.shifts || new Set(s.shifts.map((w) => w.code)).size === s.shifts.length, {
+    message: 'shift codes must be unique',
+    path: ['shifts'],
+  });
 
 // ---------- Typed checks (procedures and inspections share this schema) ----------
 
 export const CHECK_TYPES = ['pass_fail', 'numeric', 'text', 'photo', 'acknowledgment'] as const;
 export type CheckType = (typeof CHECK_TYPES)[number];
+
+export const VISIBLE_WHEN = ['failed', 'passed', 'outside_limits'] as const;
+export type VisibleWhen = (typeof VISIBLE_WHEN)[number];
+
+export const visibleWhen = z.object({
+  key: z.string().regex(/^[a-z0-9_]{1,60}$/),
+  when: z.enum(VISIBLE_WHEN),
+});
 
 export const checkDefinition = z
   .object({
@@ -54,16 +76,41 @@ export const checkDefinition = z
     unit: z.string().max(30).nullable().default(null),
     evidence_required: z.boolean().default(false),
     safety_critical: z.boolean().default(false),
+    visible_when: visibleWhen.nullable().default(null),
   })
   .refine((c) => c.type !== 'numeric' || c.unit !== null, { message: 'numeric checks require a unit', path: ['unit'] })
   .refine((c) => c.min === null || c.max === null || c.min <= c.max, { message: 'min must not exceed max', path: ['min'] });
 export type CheckDefinition = z.infer<typeof checkDefinition>;
 
+/** Rejects forward references, cycles, unknown keys, and conditions the prior check cannot produce. */
+export function checkGraphError(list: Array<Pick<CheckDefinition, 'key' | 'type' | 'visible_when'>>): string | null {
+  const index = new Map(list.map((step, i) => [step.key, i]));
+  for (const step of list) {
+    const rule = step.visible_when;
+    if (!rule) continue;
+    const priorAt = index.get(rule.key);
+    if (priorAt === undefined) return `Check "${step.key}" references unknown check "${rule.key}"`;
+    if (priorAt >= index.get(step.key)!) return `Check "${step.key}" must reference an earlier check`;
+    const prior = list[priorAt]!;
+    if (rule.when === 'outside_limits' && prior.type !== 'numeric') {
+      return `Check "${step.key}" uses outside_limits, which requires numeric check "${rule.key}"`;
+    }
+    if ((rule.when === 'failed' || rule.when === 'passed') && prior.type !== 'pass_fail' && prior.type !== 'numeric') {
+      return `Check "${step.key}" uses ${rule.when}, which requires a pass/fail or numeric check`;
+    }
+  }
+  return null;
+}
+
 export const checkListSchema = z
   .array(checkDefinition)
   .min(1)
   .max(200)
-  .refine((list) => new Set(list.map((c) => c.key)).size === list.length, { message: 'check keys must be unique' });
+  .refine((list) => new Set(list.map((c) => c.key)).size === list.length, { message: 'check keys must be unique' })
+  .check((ctx) => {
+    const message = checkGraphError(ctx.value);
+    if (message) ctx.issues.push({ code: 'custom', message, input: ctx.value });
+  });
 
 export const checkValue = z.object({
   key: z.string().regex(/^[a-z0-9_]{1,60}$/),
@@ -86,7 +133,16 @@ export const procedureRevisionRequest = z.object({
   safety_instructions: z.string().min(1).max(10000),
   steps: checkListSchema,
   estimated_minutes: z.number().int().positive().max(100000).nullable().default(null),
+  signature_required: z.boolean().default(false),
 });
+
+export const completionSignatureRequest = z.object({
+  snapshot_hash: z.string().regex(/^[a-f0-9]{64}$/),
+  record_version: z.number().int().positive(),
+  client_op_id: z.string().max(100).nullable().default(null),
+  amendment_reason: z.string().max(2000).nullable().default(null),
+});
+export type CompletionSignatureRequest = z.infer<typeof completionSignatureRequest>;
 
 // ---------- Requests ----------
 
@@ -401,6 +457,7 @@ export const createInspectionTemplateRequest = z.object({
 export const inspectionRevisionRequest = z.object({
   instructions: z.string().max(10000).default(''),
   checks: checkListSchema,
+  signature_required: z.boolean().default(false),
 });
 
 export const startInspectionRequest = z.object({
@@ -413,6 +470,7 @@ export const startInspectionRequest = z.object({
 export const submitInspectionRequest = z.object({
   observed_at: isoTimestamp,
   values: z.array(checkValue).max(200),
+  signature: z.object({ snapshot_hash: z.string().regex(/^[a-f0-9]{64}$/) }).nullable().default(null),
 });
 
 export interface TransitionResult {

@@ -162,7 +162,7 @@ export function Reports({ siteId }: { siteId: string }) {
         <div className="row">
           <label>Metric
             <select value={metric} onChange={(e) => setMetric(e.target.value)}>
-              {['failure_count', 'mtbf', 'mttr', 'downtime', 'overdue_backlog', 'pm_compliance', 'repeat_faults', 'maintenance_cost'].map((m) => <option key={m}>{m}</option>)}
+              {['failure_count', 'mtbf', 'mttr', 'mtta', 'downtime', 'overdue_backlog', 'pm_compliance', 'repeat_faults', 'maintenance_cost'].map((m) => <option key={m}>{m}</option>)}
             </select>
           </label>
           <button type="button" onClick={() => void run()}>Run report</button>

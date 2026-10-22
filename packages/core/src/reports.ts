@@ -7,7 +7,7 @@ import { exposureInPeriod, mtbf, mttr, repeatFaults, unionHours, type ExposureRe
 import { iso } from './records.ts';
 import { loadSiteSettings } from './settings.ts';
 
-export const REPORT_METRICS = ['failure_count', 'mtbf', 'mttr', 'downtime', 'overdue_backlog', 'pm_compliance', 'repeat_faults', 'maintenance_cost'] as const;
+export const REPORT_METRICS = ['failure_count', 'mtbf', 'mttr', 'mtta', 'downtime', 'overdue_backlog', 'pm_compliance', 'repeat_faults', 'maintenance_cost'] as const;
 export type ReportMetric = (typeof REPORT_METRICS)[number];
 
 export interface ReportQuery {
@@ -104,6 +104,40 @@ async function mttrReport(s: Services, sc: Scope) {
     active_repair_labor_hours: Math.round((restored.reduce((a, r) => a + r.labor_minutes, 0) / 60) * 100) / 100,
     open_failures: open.map((o) => ({ id: o.id, asset_id: o.asset_id, started_at: iso(o.started_at) })),
     source_records: restored.map((r) => ({ type: 'failure_event', id: r.id })),
+  };
+}
+
+async function mttaReport(s: Services, sc: Scope) {
+  const asset = sc.assetId;
+  const { rows: accepted } = await s.db.query(
+    `SELECT id, created_at, triaged_at FROM maintenance.request
+      WHERE tenant_id = $1 AND site_id = $2 AND state = 'accepted' AND triaged_at >= $3 AND triaged_at < $4
+        AND ($5::uuid IS NULL OR asset_id = $5)
+      ORDER BY triaged_at, id`,
+    [sc.tenantId, sc.siteId, sc.from, sc.to, asset],
+  );
+  const { rows: rejected } = await s.db.query(
+    `SELECT count(*)::int AS n FROM maintenance.request
+      WHERE tenant_id = $1 AND site_id = $2 AND state = 'rejected' AND triaged_at >= $3 AND triaged_at < $4
+        AND ($5::uuid IS NULL OR asset_id = $5)`,
+    [sc.tenantId, sc.siteId, sc.from, sc.to, asset],
+  );
+  const { rows: open } = await s.db.query(
+    `SELECT id, state, created_at FROM maintenance.request
+      WHERE tenant_id = $1 AND site_id = $2 AND state IN ('submitted', 'under_review') AND created_at >= $3 AND created_at < $4
+        AND ($5::uuid IS NULL OR asset_id = $5)
+      ORDER BY created_at, id`,
+    [sc.tenantId, sc.siteId, sc.from, sc.to, asset],
+  );
+  const hours = accepted.map((row) => (new Date(row.triaged_at).getTime() - new Date(row.created_at).getTime()) / 3_600_000);
+  const average = hours.length ? Math.round((hours.reduce((sum, value) => sum + value, 0) / hours.length) * 100) / 100 : null;
+  return {
+    cohort: 'requests accepted within the period',
+    average_hours: average,
+    accepted_count: accepted.length,
+    rejected_count: rejected[0]?.n ?? 0,
+    open_requests: open.map((row) => ({ id: row.id, state: row.state, submitted_at: iso(row.created_at) })),
+    source_records: accepted.map((row) => ({ type: 'request', id: row.id })),
   };
 }
 
@@ -231,6 +265,9 @@ export async function runReport(s: Services, actor: Actor, metric: ReportMetric,
       break;
     case 'mttr':
       data = await mttrReport(s, sc);
+      break;
+    case 'mtta':
+      data = await mttaReport(s, sc);
       break;
     case 'downtime':
       data = await downtimeReport(s, sc);

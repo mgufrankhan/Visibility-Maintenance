@@ -3,7 +3,7 @@ const STORE = 'operations';
 
 export interface QueuedOperation {
   client_op_id: string;
-  type: 'task_results' | 'labor' | 'comment' | 'transition' | 'request' | 'downtime';
+  type: 'task_results' | 'labor' | 'comment' | 'transition' | 'request' | 'downtime' | 'completion_signature';
   record_id: string | null;
   base_version: number | null;
   payload: Record<string, unknown>;

@@ -100,7 +100,7 @@ describe('backup and restore (AC-12)', () => {
     const counts = manifest.databases[0]!.table_counts;
     expect(counts['maintenance.pm_occurrence']).toBe(1);
     expect(counts['platform.asset']).toBe(2);
-    expect(manifest.databases[0]!.schema_versions).toMatchObject({ platform: '0002', maintenance: '0009', integration: '0001' });
+    expect(manifest.databases[0]!.schema_versions).toMatchObject({ platform: '0002', maintenance: '0010', integration: '0001' });
     expect((await verifyBackup(backupDir)).failures).toEqual([]);
     const health = await operationalHealth(h.services);
     expect(health.backup).toMatchObject({ completed_at: manifest.completed_at });

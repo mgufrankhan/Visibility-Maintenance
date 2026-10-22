@@ -4,7 +4,8 @@ import type { CheckDefinition, checkExceptionRequest, commentRequest, laborEntry
 import { can } from '@vm/policy';
 import { AppError, conflict, forbidden, invalid } from '@vm/server-kit';
 import type { z } from 'zod';
-import { evaluateCheck } from './checks.ts';
+import { evaluateCheck, isStepVisible } from './checks.ts';
+import { currentResults } from './work-orders.ts';
 import type { Actor, Services } from './context.ts';
 import { requirePermission } from './access.ts';
 import { iso, writeAudit } from './records.ts';
@@ -42,19 +43,45 @@ export async function recordTaskResults(s: Services, actor: Actor, woId: string,
       const { rows } = await tx.query(`SELECT id, step_key FROM maintenance.task_result WHERE tenant_id = $1 AND recorded_by = $2 AND client_op_id = $3`, [p.tenantId, p.userId, input.client_op_id]);
       if (rows.length > 0) return { results: rows, replayed: true };
     }
-    const steps = new Map<string, CheckDefinition>((wo.procedure_snapshot?.steps ?? []).map((st: CheckDefinition) => [st.key, st]));
+    const stepList: CheckDefinition[] = wo.procedure_snapshot?.steps ?? [];
+    const steps = new Map<string, CheckDefinition>(stepList.map((st) => [st.key, st]));
     const attachments = await availableAttachments(tx, p.tenantId, wo.id);
+    const working = new Map(
+      [...(await currentResults(tx, p.tenantId, wo.id, wo.cycle)).entries()].map(([key, row]) => [key, { passed: row.passed as boolean | null, note: row.note as string | null }]),
+    );
     const errors: Record<string, string[]> = {};
-    const evaluated = input.results.map((r) => {
-      const def = steps.get(r.key);
-      if (!def) {
-        errors[`results.${r.key}`] = ['Step is not part of the issued procedure revision'];
-        return null;
+    const incoming = new Map(input.results.map((r) => [r.key, r]));
+    const evaluated: Array<{ r: (typeof input.results)[number]; passed: boolean | null }> = [];
+    for (const def of stepList) {
+      const r = incoming.get(def.key);
+      if (!r) continue;
+      if (!isStepVisible(def, working)) {
+        const hidden = { ...r, value: null, unit: null, note: 'not_applicable', attachment_ids: [] as string[] };
+        evaluated.push({ r: hidden, passed: null });
+        working.set(def.key, { passed: null, note: 'not_applicable' });
+        continue;
       }
       const e = evaluateCheck(def, r, attachments);
       if (e.error) errors[`results.${r.key}`] = [e.error];
-      return { r, passed: e.passed };
-    });
+      else {
+        evaluated.push({ r, passed: e.passed });
+        working.set(def.key, { passed: e.passed, note: r.note });
+      }
+    }
+    for (const r of input.results) {
+      if (!steps.has(r.key)) errors[`results.${r.key}`] = ['Step is not part of the issued procedure revision'];
+    }
+    if (!amending) {
+      for (const def of stepList) {
+        if (isStepVisible(def, working) || incoming.has(def.key)) continue;
+        const prev = working.get(def.key);
+        if (prev?.note === 'not_applicable') continue;
+        evaluated.push({
+          r: { key: def.key, value: null, unit: null, note: 'not_applicable', attachment_ids: [] },
+          passed: null,
+        });
+      }
+    }
     if (Object.keys(errors).length) throw invalid('Some results are invalid', errors);
     let supersedes: string | null = null;
     if (amending) {
