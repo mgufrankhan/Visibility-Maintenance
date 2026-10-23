@@ -2,9 +2,14 @@ import { useState, type FormEvent } from 'react';
 import { M, api } from '../api.ts';
 import { Badge, ErrorBox, Notice, PageHeader, Table, emptyRow, useList } from '../ui.tsx';
 
+const OPEN_WORK = 'draft,pending_approval,ready,in_progress,on_hold,pending_review';
+
 export function Overview({ siteId }: { siteId: string }) {
   const work = useList<any>(`${M}/work-orders?site_id=${siteId}&limit=50`);
+  const critical = useList<any>(`${M}/work-orders?site_id=${siteId}&priority=critical&state=${OPEN_WORK}&limit=50`);
   const overdue = useList<any>(`${M}/work-orders?site_id=${siteId}&overdue=true&limit=50`);
+  const pmDue = useList<any>(`${M}/work-orders?site_id=${siteId}&type=preventive&overdue=true&limit=50`);
+  const queue = useList<any>(`${M}/work-orders?site_id=${siteId}&unassigned=true&limit=50`);
   const ready = useList<any>(`${M}/work-orders?site_id=${siteId}&state=ready&limit=50`);
   const openReqs = useList<any>(`${M}/requests?site_id=${siteId}&state=submitted,under_review&limit=50`);
   const plans = useList<any>(`${M}/plans?site_id=${siteId}&status=active`);
@@ -23,9 +28,21 @@ export function Overview({ siteId }: { siteId: string }) {
         }
       />
       <div className="stat-grid">
+        <a className={`stat-card ${critical.items.length ? 'warn' : ''}`} href={`#/work?priority=critical&state=${OPEN_WORK}`}>
+          <span className="stat-value">{critical.loading ? '…' : critical.items.length}</span>
+          <div className="stat-label">Critical work</div>
+        </a>
         <a className={`stat-card ${overdue.items.length ? 'warn' : ''}`} href="#/work?overdue=true">
           <span className="stat-value">{overdue.loading ? '…' : overdue.items.length}</span>
           <div className="stat-label">Overdue work</div>
+        </a>
+        <a className={`stat-card ${pmDue.items.length ? 'warn' : ''}`} href="#/work?type=preventive&overdue=true">
+          <span className="stat-value">{pmDue.loading ? '…' : pmDue.items.length}</span>
+          <div className="stat-label">PM due</div>
+        </a>
+        <a className="stat-card" href="#/work?unassigned=true">
+          <span className="stat-value">{queue.loading ? '…' : queue.items.length}</span>
+          <div className="stat-label">Team queue</div>
         </a>
         <a className="stat-card" href="#/requests?state=submitted,under_review">
           <span className="stat-value">{openReqs.loading ? '…' : openReqs.items.length}</span>
@@ -40,7 +57,7 @@ export function Overview({ siteId }: { siteId: string }) {
           <div className="stat-label">Active PM plans</div>
         </a>
       </div>
-      <ErrorBox err={work.err ?? overdue.err ?? ready.err ?? openReqs.err ?? plans.err} />
+      <ErrorBox err={work.err ?? critical.err ?? overdue.err ?? pmDue.err ?? queue.err ?? ready.err ?? openReqs.err ?? plans.err} />
       <div className="split-2">
         <div className="card">
           <h3 style={{ marginTop: 0 }}>Open requests</h3>

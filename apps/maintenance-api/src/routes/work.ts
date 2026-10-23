@@ -8,6 +8,7 @@ import {
   laborEntryRequest,
   pageQuery,
   patchWorkOrderRequest,
+  priority,
   procedureRevisionRequest,
   taskResultRequest,
   transitionRequest,
@@ -48,6 +49,9 @@ const workOrderListQuery = pageQuery.extend({
   my_work: z.stringbool().optional(),
   team_id: uuid.optional(),
   asset_id: z.string().max(100).optional(),
+  priority: priority.optional(),
+  type: z.enum(['corrective', 'preventive', 'inspection', 'follow_up']).optional(),
+  unassigned: z.stringbool().optional(),
   overdue: z.stringbool().optional(),
   q: z.string().max(200).optional(),
 });

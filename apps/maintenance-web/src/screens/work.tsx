@@ -73,6 +73,8 @@ function stepShown(step: any, steps: any[], values: Record<string, string>): boo
 }
 
 const WORK_STATES = ['draft', 'pending_approval', 'ready', 'in_progress', 'on_hold', 'pending_review', 'closed', 'cancelled'];
+const WORK_PRIORITIES = ['critical', 'high', 'normal', 'low'];
+const WORK_TYPES = ['corrective', 'preventive', 'inspection', 'follow_up'];
 
 function workOrigin(item: { type?: string; source_request_id?: string | null; plan_occurrence_id?: string | null; follow_up_of_id?: string | null; non_asset_category?: string | null }): string {
   if (item.non_asset_category === 'shutdown') return 'Shutdown';
@@ -99,9 +101,32 @@ function workFilter(siteId: string, query: string): { path: string; note: string
     notes.push('Overdue work only');
   }
   const state = params.get('state');
-  if (state && state.split(',').every((item) => WORK_STATES.includes(item))) {
+  const priority = params.get('priority');
+  const openWork = 'draft,pending_approval,ready,in_progress,on_hold,pending_review';
+  const stateOk = !!state && state.split(',').every((item) => WORK_STATES.includes(item));
+  const priorityOk = !!priority && WORK_PRIORITIES.includes(priority);
+  if (stateOk && state === openWork && priorityOk && priority === 'critical') {
     search.set('state', state);
-    notes.push(state === 'ready' ? 'Ready orders only' : `State ${state.split(',').join(', ')}`);
+    search.set('priority', priority);
+    notes.push('Open critical work');
+  } else {
+    if (stateOk && state) {
+      search.set('state', state);
+      notes.push(state === 'ready' ? 'Ready orders only' : `State ${state.split(',').join(', ')}`);
+    }
+    if (priorityOk && priority) {
+      search.set('priority', priority);
+      notes.push(priority === 'critical' ? 'Critical work only' : `${priority} priority`);
+    }
+  }
+  const type = params.get('type');
+  if (type && WORK_TYPES.includes(type)) {
+    search.set('type', type);
+    notes.push(type === 'preventive' ? 'Preventive work' : `Type ${type}`);
+  }
+  if (params.get('unassigned') === 'true') {
+    search.set('unassigned', 'true');
+    notes.push('Team queue');
   }
   return { path: `${M}/work-orders?${search.toString()}`, note: notes.length ? notes.join(' · ') : null };
 }

@@ -187,6 +187,35 @@ describe('KPI reconciliation (AC-11)', () => {
   });
 });
 
+describe('work list slices', () => {
+  it('separates critical work, the unassigned queue, and overdue preventive work', async () => {
+    const draft = async (body: Record<string, unknown>) => {
+      const created = await h.call(h.users.sup, 'POST', `${M}/work-orders`, {
+        site_id: h.siteA1, asset_id: k1, scope: 'Check', team_id: h.teamA1, ...body,
+      });
+      expect(created.status, JSON.stringify(created.body)).toBe(201);
+      return created.body.id as string;
+    };
+    const critical = await draft({ title: 'Critical leak', priority: 'critical', due_at: '2026-10-01T00:00:00Z' });
+    const pm = await draft({ title: 'Due lubrication', type: 'preventive', priority: 'normal', due_at: '2026-10-02T00:00:00Z' });
+    const owned = await draft({ title: 'Assigned normal', priority: 'normal', assignee_id: h.users.tech.id, due_at: '2026-12-01T00:00:00Z' });
+    const ids = async (query: string) => {
+      const listed = await h.call(h.users.sup, 'GET', `${M}/work-orders?site_id=${h.siteA1}&${query}`);
+      expect(listed.status, JSON.stringify(listed.body)).toBe(200);
+      return (listed.body.items as Array<{ id: string }>).map((item) => item.id);
+    };
+    const openCritical = await ids('priority=critical&state=draft,pending_approval,ready,in_progress,on_hold,pending_review');
+    expect(openCritical).toContain(critical);
+    expect(openCritical).not.toContain(pm);
+    const queue = await ids('unassigned=true');
+    expect(queue).toEqual(expect.arrayContaining([critical, pm]));
+    expect(queue).not.toContain(owned);
+    const due = await ids('type=preventive&overdue=true');
+    expect(due).toContain(pm);
+    expect(due).not.toContain(critical);
+  });
+});
+
 describe('exports', () => {
   it('scopes exports, hides cost columns without cost permission, and neutralizes formulas', async () => {
     await h.call(h.users.reporter, 'POST', `${M}/requests`, { site_id: h.siteA1, location_text: 'Yard', description: '=HYPERLINK("http://evil","x")', observed_at: '2026-11-14T00:00:00Z' });

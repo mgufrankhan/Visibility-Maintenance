@@ -327,6 +327,9 @@ export interface WorkOrderListQuery {
   my_work?: boolean;
   team_id?: string;
   asset_id?: string;
+  priority?: 'critical' | 'high' | 'normal' | 'low';
+  type?: 'corrective' | 'preventive' | 'inspection' | 'follow_up';
+  unassigned?: boolean;
   overdue?: boolean;
   q?: string;
   cursor?: string;
@@ -347,6 +350,9 @@ export async function listWorkOrders(s: Services, actor: Actor, q: WorkOrderList
   }
   if (q.team_id) where.push(`team_id = $${params.push(q.team_id)}`);
   if (q.asset_id) where.push(`asset_id = $${params.push(q.asset_id)}`);
+  if (q.priority) where.push(`priority = $${params.push(q.priority)}`);
+  if (q.type) where.push(`type = $${params.push(q.type)}`);
+  if (q.unassigned) where.push(`assignee_id IS NULL AND state NOT IN ('closed','cancelled')`);
   if (q.overdue) where.push(`due_at < $${params.push(s.clock.now())} AND state NOT IN ('closed','cancelled')`);
   if (q.q) where.push(`(title ILIKE $${params.push(`%${q.q}%`)} OR display_number::text = $${params.push(q.q)})`);
   const cursor = decodeCursor(q.cursor);
