@@ -68,9 +68,14 @@ const ALL_ROUTES = NAV_GROUPS.flatMap((g) => g.items);
 
 const SITE_KEY = 'vm.siteId';
 
-function routeFromHash(): Route {
-  const id = location.hash.replace(/^#\/?/, '') as Route;
-  return ALL_ROUTES.some((r) => r.id === id) ? id : 'overview';
+function locationFromHash(): { route: Route; query: string } {
+  const raw = location.hash.replace(/^#\/?/, '');
+  const splitAt = raw.indexOf('?');
+  const id = (splitAt === -1 ? raw : raw.slice(0, splitAt)) as Route;
+  return {
+    route: ALL_ROUTES.some((r) => r.id === id) ? id : 'overview',
+    query: splitAt === -1 ? '' : raw.slice(splitAt + 1),
+  };
 }
 
 export function App() {
@@ -78,13 +83,14 @@ export function App() {
   const [me, setMe] = useState<Me | null>(null);
   const [sites, setSites] = useState<Site[]>([]);
   const [siteId, setSiteId] = useState(() => sessionStorage.getItem(SITE_KEY) ?? '');
-  const [route, setRoute] = useState<Route>(routeFromHash);
+  const [location, setLocation] = useState(locationFromHash);
+  const route = location.route;
   const [online, setOnline] = useState(navigator.onLine);
   const [queue, setQueue] = useState<QueuedOperation[]>([]);
   const [bootError, setBootError] = useState<unknown>(null);
 
   useEffect(() => {
-    const onHash = () => setRoute(routeFromHash());
+    const onHash = () => setLocation(locationFromHash());
     const onOnline = () => setOnline(navigator.onLine);
     window.addEventListener('hashchange', onHash);
     window.addEventListener('online', onOnline);
@@ -189,7 +195,7 @@ export function App() {
           <ErrorBox err={bootError} />
           {queue.length > 0 && <QueueBanner items={queue} onFlush={() => flushQueue(loadQueue)} />}
           {siteId ? (
-            <Screen route={route} siteId={siteId} me={me} online={online} onQueued={loadQueue} timezone={sites.find((s) => s.id === siteId)?.timezone ?? 'UTC'} />
+            <Screen route={route} query={location.query} siteId={siteId} me={me} online={online} onQueued={loadQueue} timezone={sites.find((s) => s.id === siteId)?.timezone ?? 'UTC'} />
           ) : (
             <div className="card">
               <EmptyState
@@ -284,18 +290,18 @@ async function flushQueue(reload: () => Promise<void>) {
   await reload();
 }
 
-function Screen({ route, siteId, me, online, onQueued, timezone }: { route: Route; siteId: string; me: Me | null; online: boolean; onQueued: () => Promise<void>; timezone: string }) {
+function Screen({ route, query, siteId, me, online, onQueued, timezone }: { route: Route; query: string; siteId: string; me: Me | null; online: boolean; onQueued: () => Promise<void>; timezone: string }) {
   switch (route) {
     case 'overview':
       return <Overview siteId={siteId} />;
     case 'requests':
-      return <Requests siteId={siteId} />;
+      return <Requests siteId={siteId} query={query} />;
     case 'work':
-      return <WorkOrders siteId={siteId} timezone={timezone} />;
+      return <WorkOrders siteId={siteId} timezone={timezone} query={query} />;
     case 'my-work':
       return <MyWork siteId={siteId} online={online} onQueued={onQueued} />;
     case 'pm':
-      return <Plans siteId={siteId} />;
+      return <Plans siteId={siteId} query={query} />;
     case 'inspections':
       return <Inspections siteId={siteId} />;
     case 'assets':

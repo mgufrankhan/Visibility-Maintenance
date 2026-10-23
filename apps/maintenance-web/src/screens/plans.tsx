@@ -2,8 +2,19 @@ import { useState, type FormEvent } from 'react';
 import { M, api } from '../api.ts';
 import { Badge, ErrorBox, Panel, emptyRow, useList, PageHeader, Table } from '../ui.tsx'
 
-export function Plans({ siteId }: { siteId: string }) {
-  const list = useList<any>(`${M}/plans?site_id=${siteId}`);
+const PLAN_STATUSES = ['draft', 'active', 'paused', 'archived'];
+
+function planFilter(siteId: string, query: string): { path: string; note: string | null } {
+  const status = new URLSearchParams(query).get('status');
+  const search = new URLSearchParams({ site_id: siteId });
+  if (!status || !PLAN_STATUSES.includes(status)) return { path: `${M}/plans?${search.toString()}`, note: null };
+  search.set('status', status);
+  return { path: `${M}/plans?${search.toString()}`, note: status === 'active' ? 'Active plans only' : `Status ${status}` };
+}
+
+export function Plans({ siteId, query }: { siteId: string; query: string }) {
+  const filter = planFilter(siteId, query);
+  const list = useList<any>(filter.path);
   const assets = useList<any>(`${M}/asset-profiles?site_id=${siteId}`);
   const teams = useList<any>(`${M}/teams?site_id=${siteId}`);
   const procedures = useList<any>(`${M}/procedures?site_id=${siteId}`);
@@ -103,6 +114,7 @@ export function Plans({ siteId }: { siteId: string }) {
   return (
     <>
       <PageHeader title="Preventive maintenance" lede="Publish calendar, completion, and meter-based plans. A completion plan's next due follows the previous closure. Pause stops generation and leaves the open order in place." />
+      {filter.note && <p className="muted">{filter.note}. <a href="#/pm">Show all plans</a></p>}
       <form className="card" onSubmit={(e) => void create(e)}>
         <h3>New plan</h3>
         <label>Schedule
@@ -175,7 +187,7 @@ export function Plans({ siteId }: { siteId: string }) {
               <td><button type="button" className="secondary" onClick={() => void open(p.id)}>Open</button></td>
             </tr>
           ))}
-          {!list.items.length && emptyRow(4, list.loading, 'No plans yet.')}
+          {!list.items.length && emptyRow(4, list.loading, filter.note ? 'No matching plans.' : 'No plans yet.')}
         </tbody>
       </Table>
       {selected && (

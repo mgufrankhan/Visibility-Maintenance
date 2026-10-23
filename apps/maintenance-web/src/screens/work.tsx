@@ -72,8 +72,50 @@ function stepShown(step: any, steps: any[], values: Record<string, string>): boo
   return false;
 }
 
-export function WorkOrders({ siteId, timezone }: { siteId: string; timezone: string }) {
-  const list = useList<any>(`${M}/work-orders?site_id=${siteId}`);
+const WORK_STATES = ['draft', 'pending_approval', 'ready', 'in_progress', 'on_hold', 'pending_review', 'closed', 'cancelled'];
+
+function workOrigin(item: { type?: string; source_request_id?: string | null; plan_occurrence_id?: string | null; follow_up_of_id?: string | null; non_asset_category?: string | null }): string {
+  if (item.non_asset_category === 'shutdown') return 'Shutdown';
+  if (item.follow_up_of_id || item.type === 'follow_up') return 'Follow-up';
+  if (item.plan_occurrence_id || item.type === 'preventive') return 'PM';
+  if (item.type === 'inspection') return 'Inspection';
+  if (item.source_request_id) return 'Request';
+  return 'Manual';
+}
+
+function workAsset(item: { asset_snapshot?: { code?: string; name?: string } | null; non_asset_category?: string | null }): string {
+  const snapshot = item.asset_snapshot;
+  if (snapshot?.code) return snapshot.name ? `${snapshot.code} — ${snapshot.name}` : snapshot.code;
+  if (item.non_asset_category === 'shutdown') return 'Shutdown';
+  return '—';
+}
+
+function workFilter(siteId: string, query: string): { path: string; note: string | null } {
+  const params = new URLSearchParams(query);
+  const search = new URLSearchParams({ site_id: siteId });
+  const notes: string[] = [];
+  if (params.get('overdue') === 'true') {
+    search.set('overdue', 'true');
+    notes.push('Overdue work only');
+  }
+  const state = params.get('state');
+  if (state && state.split(',').every((item) => WORK_STATES.includes(item))) {
+    search.set('state', state);
+    notes.push(state === 'ready' ? 'Ready orders only' : `State ${state.split(',').join(', ')}`);
+  }
+  return { path: `${M}/work-orders?${search.toString()}`, note: notes.length ? notes.join(' · ') : null };
+}
+
+export function WorkOrders({ siteId, timezone, query }: { siteId: string; timezone: string; query: string }) {
+  const filter = workFilter(siteId, query);
+  const assets = useList<any>(`${M}/asset-profiles?site_id=${siteId}&limit=100`);
+  const [searchText, setSearchText] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
+  const [assetId, setAssetId] = useState('');
+  const listParams = new URLSearchParams(filter.path.split('?')[1] ?? '');
+  if (appliedSearch.trim()) listParams.set('q', appliedSearch.trim());
+  if (assetId) listParams.set('asset_id', assetId);
+  const list = useList<any>(`${M}/work-orders?${listParams.toString()}`);
   const procedures = useList<any>(`${M}/procedures?site_id=${siteId}`);
   const [selected, setSelected] = useState<any>(null);
   const [err, setErr] = useState<unknown>(null);
@@ -370,6 +412,28 @@ export function WorkOrders({ siteId, timezone }: { siteId: string; timezone: str
           </button>
         }
       />
+      {filter.note && <p className="muted">{filter.note}. <a href="#/work">Show all work orders</a></p>}
+      <form className="card" onSubmit={(e) => { e.preventDefault(); setAppliedSearch(searchText); }}>
+        <div className="row">
+          <label>Search
+            <input value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="Title or order number" />
+          </label>
+          <label>Asset
+            <select value={assetId} onChange={(e) => setAssetId(e.target.value)}>
+              <option value="">Any</option>
+              {assets.items.map((profile) => {
+                const asset = profile.asset;
+                if (!asset?.id) return null;
+                return <option key={asset.id} value={asset.id}>{asset.code} — {asset.name}</option>;
+              })}
+            </select>
+          </label>
+          <button type="submit">Search</button>
+          {(appliedSearch || assetId) && (
+            <button type="button" className="secondary" onClick={() => { setSearchText(''); setAppliedSearch(''); setAssetId(''); }}>Clear</button>
+          )}
+        </div>
+      </form>
       <ErrorBox err={list.err ?? err} />
       {view === 'list' && (
         <form className="card" onSubmit={(e) => void createShutdown(e)}>
@@ -401,18 +465,20 @@ export function WorkOrders({ siteId, timezone }: { siteId: string; timezone: str
         />
       )}
       {view === 'list' && <Table>
-        <thead><tr><th>No.</th><th>Title</th><th>State</th><th>Assignee</th><th>Due</th></tr></thead>
+        <thead><tr><th>No.</th><th>Title</th><th>Asset</th><th>Origin</th><th>State</th><th>Assignee</th><th>Due</th></tr></thead>
         <tbody>
           {list.items.map((w) => (
             <tr key={w.id}>
               <td><button className="secondary" type="button" onClick={() => void open(w.id)}>{w.display_number}</button></td>
               <td>{w.title}</td>
+              <td>{workAsset(w)}</td>
+              <td>{workOrigin(w)}</td>
               <td><Badge state={w.state} />{w.overdue ? ' overdue' : ''}</td>
               <td>{w.assignee_id ?? 'team queue'}</td>
               <td>{w.due_at ?? '—'}</td>
             </tr>
           ))}
-          {!list.items.length && emptyRow(5, list.loading)}
+          {!list.items.length && emptyRow(7, list.loading, filter.note || appliedSearch || assetId ? 'No matching work orders.' : 'No records.')}
         </tbody>
       </Table>}
       {selected && (

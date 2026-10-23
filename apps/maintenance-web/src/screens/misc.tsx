@@ -4,13 +4,12 @@ import { Badge, ErrorBox, Notice, PageHeader, Table, emptyRow, useList } from '.
 
 export function Overview({ siteId }: { siteId: string }) {
   const work = useList<any>(`${M}/work-orders?site_id=${siteId}&limit=50`);
-  const reqs = useList<any>(`${M}/requests?site_id=${siteId}&limit=50`);
+  const overdue = useList<any>(`${M}/work-orders?site_id=${siteId}&overdue=true&limit=50`);
+  const ready = useList<any>(`${M}/work-orders?site_id=${siteId}&state=ready&limit=50`);
+  const openReqs = useList<any>(`${M}/requests?site_id=${siteId}&state=submitted,under_review&limit=50`);
   const plans = useList<any>(`${M}/plans?site_id=${siteId}&status=active`);
-  const overdue = work.items.filter((w) => w.overdue);
-  const openReqs = reqs.items.filter((r) => r.state === 'submitted' || r.state === 'under_review');
-  const ready = work.items.filter((w) => w.state === 'ready');
   const recentWork = work.items.slice(0, 5);
-  const recentReqs = openReqs.slice(0, 5);
+  const recentReqs = openReqs.items.slice(0, 5);
   return (
     <>
       <PageHeader
@@ -24,28 +23,28 @@ export function Overview({ siteId }: { siteId: string }) {
         }
       />
       <div className="stat-grid">
-        <a className={`stat-card ${overdue.length ? 'warn' : ''}`} href="#/work">
-          <span className="stat-value">{work.loading ? '…' : overdue.length}</span>
+        <a className={`stat-card ${overdue.items.length ? 'warn' : ''}`} href="#/work?overdue=true">
+          <span className="stat-value">{overdue.loading ? '…' : overdue.items.length}</span>
           <div className="stat-label">Overdue work</div>
         </a>
-        <a className="stat-card" href="#/requests">
-          <span className="stat-value">{reqs.loading ? '…' : openReqs.length}</span>
+        <a className="stat-card" href="#/requests?state=submitted,under_review">
+          <span className="stat-value">{openReqs.loading ? '…' : openReqs.items.length}</span>
           <div className="stat-label">Open requests</div>
         </a>
-        <a className={`stat-card ${ready.length ? 'ok' : ''}`} href="#/work">
-          <span className="stat-value">{work.loading ? '…' : ready.length}</span>
+        <a className={`stat-card ${ready.items.length ? 'ok' : ''}`} href="#/work?state=ready">
+          <span className="stat-value">{ready.loading ? '…' : ready.items.length}</span>
           <div className="stat-label">Ready orders</div>
         </a>
-        <a className="stat-card" href="#/pm">
+        <a className="stat-card" href="#/pm?status=active">
           <span className="stat-value">{plans.loading ? '…' : plans.items.length}</span>
           <div className="stat-label">Active PM plans</div>
         </a>
       </div>
-      <ErrorBox err={work.err ?? reqs.err ?? plans.err} />
+      <ErrorBox err={work.err ?? overdue.err ?? ready.err ?? openReqs.err ?? plans.err} />
       <div className="split-2">
         <div className="card">
           <h3 style={{ marginTop: 0 }}>Open requests</h3>
-          {recentReqs.length === 0 && !reqs.loading && <p className="muted">No open requests.</p>}
+          {recentReqs.length === 0 && !openReqs.loading && <p className="muted">No open requests.</p>}
           <ul className="list-recent">
             {recentReqs.map((r) => (
               <li key={r.id}>
@@ -131,9 +130,11 @@ export function Downtime({ siteId }: { siteId: string }) {
 
 export function Reports({ siteId }: { siteId: string }) {
   const teams = useList<any>(`${M}/teams?site_id=${siteId}`);
+  const assets = useList<any>(`${M}/asset-profiles?site_id=${siteId}&limit=100`);
   const [metric, setMetric] = useState('failure_count');
   const [priority, setPriority] = useState('');
   const [teamId, setTeamId] = useState('');
+  const [assetId, setAssetId] = useState('');
   const [data, setData] = useState<any>(null);
   const [err, setErr] = useState<unknown>(null);
   const run = async () => {
@@ -143,6 +144,7 @@ export function Reports({ siteId }: { siteId: string }) {
     const params = new URLSearchParams({ site_id: siteId, from: from.toISOString(), to: to.toISOString() });
     if (metric === 'overdue_backlog' && priority) params.set('priority', priority);
     if (metric === 'overdue_backlog' && teamId) params.set('team_id', teamId);
+    if (metric === 'overdue_backlog' && assetId) params.set('asset_id', assetId);
     try {
       setData(await api(`${M}/reports/${metric}?${params.toString()}`));
     } catch (e) {
@@ -183,6 +185,16 @@ export function Reports({ siteId }: { siteId: string }) {
                 <select value={teamId} onChange={(e) => setTeamId(e.target.value)}>
                   <option value="">Any</option>
                   {teams.items.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+                </select>
+              </label>
+              <label>Asset
+                <select value={assetId} onChange={(e) => setAssetId(e.target.value)}>
+                  <option value="">Any</option>
+                  {assets.items.map((profile) => {
+                    const asset = profile.asset;
+                    if (!asset?.id) return null;
+                    return <option key={asset.id} value={asset.id}>{asset.code} — {asset.name}</option>;
+                  })}
                 </select>
               </label>
             </>

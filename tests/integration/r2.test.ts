@@ -109,6 +109,58 @@ describe('R2 parts ledger', () => {
   });
 });
 
+describe('maintenance cost parts', () => {
+  it('nets a return against the receipt cost and reports a movement that has no cost', async () => {
+    const asset = await h.createAsset(h.users.assetAdmin, siteId, 'COST-1', 'Costed pump');
+    const other = await h.createAsset(h.users.assetAdmin, siteId, 'COST-2', 'Other pump');
+    const store = await h.call(h.users.admin, 'POST', `${M}/stores`, { site_id: siteId, code: 'COST', name: 'Cost cage' });
+    const priced = await h.call(h.users.admin, 'POST', `${M}/parts`, { sku: 'COST-BOLT', name: 'Bolt', unit: 'ea' });
+    const bare = await h.call(h.users.admin, 'POST', `${M}/parts`, { sku: 'COST-WASHER', name: 'Washer', unit: 'ea' });
+    const order = async (assetId: string, title: string) => {
+      const created = await h.call(h.users.sup, 'POST', `${M}/work-orders`, {
+        site_id: siteId, asset_id: assetId, title, priority: 'normal', team_id: teamId, scope: 'Fit the part',
+      });
+      expect(created.status, JSON.stringify(created.body)).toBe(201);
+      return created.body.id as string;
+    };
+    const pricedOrder = await order(asset.id, 'Fit bolt');
+    const bareOrder = await order(asset.id, 'Fit washer');
+    const otherOrder = await order(other.id, 'Fit elsewhere');
+    expect((await h.call(h.users.tech, 'POST', `${M}/stock/receive`, {
+      store_id: store.body.id, part_id: priced.body.id, quantity: 4, unit_cost: 12.5, currency: 'USD', reason: 'PO-cost',
+    })).status).toBe(201);
+    expect((await h.call(h.users.tech, 'POST', `${M}/stock/receive`, {
+      store_id: store.body.id, part_id: bare.body.id, quantity: 2, reason: 'No price',
+    })).status).toBe(201);
+    const issue = (partId: string, workOrderId: string, quantity: number) => h.call(h.users.tech, 'POST', `${M}/stock/issue`, {
+      store_id: store.body.id, part_id: partId, quantity, work_order_id: workOrderId,
+    });
+    const pricedIssue = await issue(priced.body.id, pricedOrder, 2);
+    expect(pricedIssue.status).toBe(201);
+    const pricedReturn = await h.call(h.users.tech, 'POST', `${M}/stock/return`, {
+      store_id: store.body.id, part_id: priced.body.id, quantity: 1, work_order_id: pricedOrder, reason: 'One unused',
+    });
+    expect(pricedReturn.status).toBe(201);
+    const bareIssue = await issue(bare.body.id, bareOrder, 1);
+    expect(bareIssue.status).toBe(201);
+    const otherIssue = await issue(priced.body.id, otherOrder, 1);
+    expect(otherIssue.status).toBe(201);
+    const period = 'from=2026-01-01T00:00:00Z&to=2027-01-01T00:00:00Z';
+    const report = await h.call(h.users.costSup, 'GET', `${M}/reports/maintenance_cost?site_id=${siteId}&asset_id=${asset.id}&${period}`);
+    expect(report.status, JSON.stringify(report.body)).toBe(200);
+    expect(report.body.parts).toEqual([{ currency: 'USD', amount: 12.5, issue_count: 1, return_count: 1 }]);
+    expect(report.body.coverage.parts_movements_without_cost).toBe(1);
+    expect(report.body.source_records).toEqual([
+      { type: 'stock_movement', id: pricedIssue.body.id },
+      { type: 'stock_movement', id: pricedReturn.body.id },
+    ].sort((a, b) => a.id.localeCompare(b.id)));
+    expect(report.body.coverage.stock_movement_ids_without_cost).toEqual([bareIssue.body.id]);
+    const elsewhere = await h.call(h.users.costSup, 'GET', `${M}/reports/maintenance_cost?site_id=${siteId}&asset_id=${other.id}&${period}`);
+    expect(elsewhere.body.parts).toEqual([{ currency: 'USD', amount: 12.5, issue_count: 1, return_count: 0 }]);
+    expect(elsewhere.body.source_records).toEqual([{ type: 'stock_movement', id: otherIssue.body.id }]);
+  });
+});
+
 describe('R2 CMMS authority (AC-13)', () => {
   it('blocks native edits of externally owned fields and queues an exception', async () => {
     const set = await h.call(h.users.admin, 'PUT', `${M}/sites/${siteId}/authority`, {

@@ -2,8 +2,22 @@ import { useState, type FormEvent } from 'react';
 import { M, api } from '../api.ts';
 import { Badge, ErrorBox, PageHeader, Panel, Table, emptyRow, isoLocal, useList } from '../ui.tsx';
 
-export function Requests({ siteId }: { siteId: string }) {
-  const list = useList<any>(`${M}/requests?site_id=${siteId}`);
+const REQUEST_STATES = ['submitted', 'under_review', 'accepted', 'rejected', 'duplicate'];
+
+function requestFilter(siteId: string, query: string): { path: string; note: string | null } {
+  const state = new URLSearchParams(query).get('state');
+  const search = new URLSearchParams({ site_id: siteId });
+  if (!state || !state.split(',').every((item) => REQUEST_STATES.includes(item))) {
+    return { path: `${M}/requests?${search.toString()}`, note: null };
+  }
+  search.set('state', state);
+  const note = state === 'submitted,under_review' ? 'Open requests only' : `State ${state.split(',').join(', ')}`;
+  return { path: `${M}/requests?${search.toString()}`, note };
+}
+
+export function Requests({ siteId, query }: { siteId: string; query: string }) {
+  const filter = requestFilter(siteId, query);
+  const list = useList<any>(filter.path);
   const teams = useList<any>(`${M}/teams?site_id=${siteId}`);
   const [description, setDescription] = useState('');
   const [location, setLocation] = useState('');
@@ -75,6 +89,7 @@ export function Requests({ siteId }: { siteId: string }) {
   return (
     <>
       <PageHeader title="Requests" lede="Report faults and triage them into draft work orders. Asset id is optional when a location is provided." />
+      {filter.note && <p className="muted">{filter.note}. <a href="#/requests">Show all requests</a></p>}
       <form className="card" onSubmit={(e) => void submit(e)}>
         <div className="row">
           <label>Asset id (optional)<input value={assetId} onChange={(e) => setAssetId(e.target.value)} placeholder="uuid" /></label>
@@ -96,7 +111,7 @@ export function Requests({ siteId }: { siteId: string }) {
               <td>{r.description}</td>
             </tr>
           ))}
-          {!list.items.length && emptyRow(4, list.loading, 'No requests yet.')}
+          {!list.items.length && emptyRow(4, list.loading, filter.note ? 'No matching requests.' : 'No requests yet.')}
         </tbody>
       </Table>
       {selected && (
