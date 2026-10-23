@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { M, api } from '../api.ts';
 import { Badge, ErrorBox, Notice, PageHeader, Table, emptyRow, useList } from '../ui.tsx';
 
@@ -94,11 +94,30 @@ export function Overview({ siteId }: { siteId: string }) {
   );
 }
 
-export function Downtime({ siteId }: { siteId: string }) {
+export function Downtime({ siteId, query }: { siteId: string; query: string }) {
   const list = useList<any>(`${M}/downtime-events?site_id=${siteId}`);
   const assets = useList<any>(`${M}/asset-profiles?site_id=${siteId}&limit=100`);
+  const eventId = new URLSearchParams(query).get('event');
   const [assetId, setAssetId] = useState('');
+  const [event, setEvent] = useState<any>(null);
   const [err, setErr] = useState<unknown>(null);
+  useEffect(() => {
+    if (!eventId) {
+      setEvent(null);
+      return;
+    }
+    let cancelled = false;
+    api<any>(`${M}/downtime-events/${eventId}`)
+      .then((row) => {
+        if (!cancelled) setEvent(row);
+      })
+      .catch((error) => {
+        if (!cancelled) setErr(error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId]);
   const create = async (e: FormEvent) => {
     e.preventDefault();
     setErr(null);
@@ -132,6 +151,18 @@ export function Downtime({ siteId }: { siteId: string }) {
         <ErrorBox err={err} />
       </form>
       <ErrorBox err={list.err} />
+      {event && (
+        <div className="card">
+          <h3 style={{ marginTop: 0 }}>Downtime event</h3>
+          <p>{event.classification} · started {event.started_at} · restored {event.restored_at ?? 'open'}</p>
+          {(event.work_orders ?? []).length === 0 && <p className="muted">No linked work order.</p>}
+          <ul>
+            {(event.work_orders ?? []).map((order: { work_order_id: string; display_number: string }) => (
+              <li key={order.work_order_id}><a href={`#/work?open=${order.work_order_id}`}>WO-{order.display_number}</a></li>
+            ))}
+          </ul>
+        </div>
+      )}
       <Table>
         <thead><tr><th>Asset</th><th>Classification</th><th>Started</th><th>Restored</th></tr></thead>
         <tbody>
@@ -142,6 +173,168 @@ export function Downtime({ siteId }: { siteId: string }) {
         </tbody>
       </Table>
     </>
+  );
+}
+
+const REPORT_METRICS = ['failure_count', 'mtbf', 'mttr', 'mtta', 'downtime', 'overdue_backlog', 'pm_compliance', 'repeat_faults', 'maintenance_cost'] as const;
+type ReportMetric = (typeof REPORT_METRICS)[number];
+const SOURCE_TYPES = ['failure_event', 'request', 'work_order', 'labor_entry', 'external_service_cost', 'stock_movement'] as const;
+type SourceType = (typeof SOURCE_TYPES)[number];
+
+function isReportMetric(value: string): value is ReportMetric {
+  return (REPORT_METRICS as readonly string[]).includes(value);
+}
+
+function isSourceType(value: string): value is SourceType {
+  return (SOURCE_TYPES as readonly string[]).includes(value);
+}
+
+function sourceTarget(record: { type: string; id: string; work_order_id?: string | null }): { href: string; label: string } | null {
+  if (!isSourceType(record.type)) return null;
+  switch (record.type) {
+    case 'failure_event':
+      return { href: `#/downtime?event=${record.id}`, label: 'Downtime event' };
+    case 'request':
+      return { href: `#/requests?open=${record.id}`, label: 'Request' };
+    case 'work_order':
+      return { href: `#/work?open=${record.id}`, label: 'Work order' };
+    case 'labor_entry':
+      return record.work_order_id ? { href: `#/work?open=${record.work_order_id}&focus=${record.id}`, label: 'Labor entry' } : null;
+    case 'external_service_cost':
+      return record.work_order_id ? { href: `#/work?open=${record.work_order_id}&focus=${record.id}`, label: 'External service cost' } : null;
+    case 'stock_movement':
+      return record.work_order_id ? { href: `#/work?open=${record.work_order_id}&focus=${record.id}`, label: 'Stock movement' } : null;
+    default: {
+      const never: never = record.type;
+      return never;
+    }
+  }
+}
+
+function drilldown(data: any): Array<{ key: string; href: string; label: string }> {
+  const rows = new Map<string, { key: string; href: string; label: string }>();
+  const add = (key: string, target: { href: string; label: string } | null, detail?: string) => {
+    if (!target || rows.has(key)) return;
+    rows.set(key, { key, href: target.href, label: detail ? `${target.label} · ${detail}` : target.label });
+  };
+  for (const record of data.source_records ?? []) add(`${record.type}:${record.id}`, sourceTarget(record));
+  for (const item of data.items ?? []) {
+    if (item.display_number && item.id) add(`work_order:${item.id}`, sourceTarget({ type: 'work_order', id: item.id }), `WO-${item.display_number} ${item.title ?? ''}`.trim());
+    if (item.work_order_id) add(`work_order:${item.work_order_id}`, sourceTarget({ type: 'work_order', id: item.work_order_id }), item.key ?? 'PM occurrence');
+    for (const id of item.failure_ids ?? []) add(`failure_event:${id}`, sourceTarget({ type: 'failure_event', id }));
+    for (const id of item.event_ids ?? []) add(`failure_event:${id}`, sourceTarget({ type: 'failure_event', id }));
+  }
+  for (const item of data.exemption_items ?? []) {
+    if (item.work_order_id) add(`work_order:${item.work_order_id}`, sourceTarget({ type: 'work_order', id: item.work_order_id }), 'approved exemption');
+  }
+  for (const row of data.open_requests ?? []) add(`request:${row.id}`, sourceTarget({ type: 'request', id: row.id }), row.state);
+  for (const row of data.open_failures ?? []) add(`failure_event:${row.id}`, sourceTarget({ type: 'failure_event', id: row.id }), 'still open');
+  for (const group of data.groups ?? []) {
+    for (const id of group.failure_ids ?? []) add(`failure_event:${id}`, sourceTarget({ type: 'failure_event', id }), group.failure_code);
+  }
+  return [...rows.values()];
+}
+
+function summaryLines(metric: ReportMetric, data: any): string[] {
+  switch (metric) {
+    case 'failure_count':
+      return [`Qualifying failures: ${data.value}.`];
+    case 'mtbf':
+      return [(data.items ?? []).some((item: { status: string }) => item.status === 'unavailable_no_exposure')
+        ? 'MTBF is unavailable where operating hours are missing.'
+        : 'MTBF uses operating hours divided by qualifying failures.'];
+    case 'mttr':
+      return [data.mttr_hours === null
+        ? 'MTTR is unavailable because no qualifying failure was restored in the period.'
+        : `MTTR ${data.mttr_hours} hours over ${data.restored} restored failures.`];
+    case 'mtta':
+      return [
+        data.average_hours === null
+          ? 'Average acknowledgment time is unavailable because no request was accepted in the period.'
+          : `Average acknowledgment ${data.average_hours} hours.`,
+        `Accepted ${data.accepted_count}. Rejected ${data.rejected_count}. Still open ${data.open_requests?.length ?? 0}.`,
+      ];
+    case 'downtime':
+      return [data.note];
+    case 'overdue_backlog':
+      return [`${data.value} open orders are past due as of ${data.as_of}.`];
+    case 'pm_compliance':
+      return [
+        data.compliance_pct === null ? 'Compliance is unavailable because nothing was eligible.' : `Compliance ${data.compliance_pct}%.`,
+        data.note,
+      ];
+    case 'repeat_faults':
+      return [`Window ${data.window_days} days. Repeat groups ${data.groups?.length ?? 0}. Failures with no code ${data.unknown_code}.`];
+    case 'maintenance_cost':
+      return [data.basis];
+    default: {
+      const never: never = metric;
+      return [String(never)];
+    }
+  }
+}
+
+function coverageLine(coverage: Record<string, unknown>): string {
+  return Object.entries(coverage)
+    .filter((entry): entry is [string, number] => typeof entry[1] === 'number')
+    .map(([key, value]) => `${key.replaceAll('_', ' ')} ${value}`)
+    .join(' · ');
+}
+
+function scopeAsset(data: { scope?: { asset_id?: string | null } }, profiles: Array<{ asset?: { id?: string; code?: string; name?: string } }>): string {
+  const assetId = data.scope?.asset_id;
+  if (!assetId) return 'every asset at this site';
+  const asset = profiles.find((profile) => profile.asset?.id === assetId)?.asset;
+  return asset?.code ? `${asset.code}${asset.name ? ` — ${asset.name}` : ''}` : assetId;
+}
+
+function money(rows: Array<{ currency: string; amount: number; issue_count?: number; return_count?: number }> | undefined): string {
+  if (!rows?.length) return 'none';
+  return rows.map((row) => {
+    const counts = row.issue_count === undefined ? '' : ` (${row.issue_count} issued, ${row.return_count ?? 0} returned)`;
+    return `${row.amount} ${row.currency}${counts}`;
+  }).join(', ');
+}
+
+function ReportResult({ data, profiles }: { data: any; profiles: Array<{ asset?: { id?: string; code?: string; name?: string } }> }) {
+  if (!isReportMetric(data.metric)) return null;
+  const metric = data.metric;
+  const sources = drilldown(data);
+  return (
+    <div className="card">
+      <h3 style={{ marginTop: 0 }}>{metric.replaceAll('_', ' ')}</h3>
+      <p>Period {data.period?.from} to {data.period?.to} ({data.period?.site_timezone}).</p>
+      <p>Scope {scopeAsset(data, profiles)}.</p>
+      {summaryLines(metric, data).map((line) => <p key={line}>{line}</p>)}
+      {metric === 'mtbf' && (
+        <Table>
+          <thead><tr><th>Asset</th><th>Status</th><th>MTBF hours</th><th>Failures</th></tr></thead>
+          <tbody>
+            {(data.items ?? []).map((item: { asset_id: string; asset_code: string; status: string; mtbf_hours: number | null; failures: number }) => (
+              <tr key={item.asset_id}>
+                <td>{item.asset_code}</td>
+                <td>{item.status === 'unavailable_no_exposure' ? 'Unavailable — operating hours are missing' : item.status.replaceAll('_', ' ')}</td>
+                <td>{item.mtbf_hours ?? '—'}</td>
+                <td>{item.failures}</td>
+              </tr>
+            ))}
+            {!data.items?.length && emptyRow(4, false, 'No assets in scope.')}
+          </tbody>
+        </Table>
+      )}
+      {metric === 'maintenance_cost' && (
+        <p>Labor {money(data.labor)}. External services {money(data.external_services)}. Parts {money(data.parts)}.</p>
+      )}
+      {data.coverage && <p>Coverage {coverageLine(data.coverage)}.</p>}
+      {(data.exclusions ?? []).map((item: { reason: string; count: number }) => (
+        <p key={`${item.reason}:${item.count}`} className="muted">Excluded {item.count} · {item.reason}.</p>
+      ))}
+      <h4>Source records</h4>
+      {sources.length === 0 && <p className="muted">No source records in this result.</p>}
+      <ul>
+        {sources.map((row) => <li key={row.key}><a href={row.href}>{row.label}</a></li>)}
+      </ul>
+    </div>
   );
 }
 
@@ -187,7 +380,7 @@ export function Reports({ siteId }: { siteId: string }) {
         <div className="row">
           <label>Metric
             <select value={metric} onChange={(e) => setMetric(e.target.value)}>
-              {['failure_count', 'mtbf', 'mttr', 'mtta', 'downtime', 'overdue_backlog', 'pm_compliance', 'repeat_faults', 'maintenance_cost'].map((m) => <option key={m}>{m}</option>)}
+              {REPORT_METRICS.map((m) => <option key={m}>{m}</option>)}
             </select>
           </label>
           {metric === 'overdue_backlog' && (
@@ -220,12 +413,7 @@ export function Reports({ siteId }: { siteId: string }) {
         </div>
       </div>
       <ErrorBox err={err} />
-      {data && (
-        <div className="card">
-          {data.coverage_notes && <p className="muted">{Array.isArray(data.coverage_notes) ? data.coverage_notes.join(' ') : String(data.coverage_notes)}</p>}
-          <pre>{JSON.stringify(data, null, 2)}</pre>
-        </div>
-      )}
+      {data && <ReportResult data={data} profiles={assets.items} />}
     </>
   );
 }

@@ -92,6 +92,13 @@ function workAsset(item: { asset_snapshot?: { code?: string; name?: string } | n
   return '—';
 }
 
+function ownerLabel(assigneeId: string | null | undefined, people: Array<{ id: string; display_name: string }>, loading: boolean): string {
+  if (!assigneeId) return 'team queue';
+  const name = people.find((person) => person.id === assigneeId)?.display_name;
+  if (name) return name;
+  return loading ? '…' : assigneeId;
+}
+
 function workFilter(siteId: string, query: string): { path: string; note: string | null } {
   const params = new URLSearchParams(query);
   const search = new URLSearchParams({ site_id: siteId });
@@ -133,6 +140,9 @@ function workFilter(siteId: string, query: string): { path: string; note: string
 
 export function WorkOrders({ siteId, timezone, query }: { siteId: string; timezone: string; query: string }) {
   const filter = workFilter(siteId, query);
+  const params = new URLSearchParams(query);
+  const openId = params.get('open');
+  const focusId = params.get('focus');
   const assets = useList<any>(`${M}/asset-profiles?site_id=${siteId}&limit=100`);
   const [searchText, setSearchText] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
@@ -143,6 +153,7 @@ export function WorkOrders({ siteId, timezone, query }: { siteId: string; timezo
   const list = useList<any>(`${M}/work-orders?${listParams.toString()}`);
   const procedures = useList<any>(`${M}/procedures?site_id=${siteId}`);
   const [selected, setSelected] = useState<any>(null);
+  const [movements, setMovements] = useState<Array<{ id: string; movement_type: string; quantity: number; unit: string }>>([]);
   const [err, setErr] = useState<unknown>(null);
   const [conflict, setConflict] = useState<string | null>(null);
   const [laborMinutes, setLaborMinutes] = useState('30');
@@ -161,12 +172,17 @@ export function WorkOrders({ siteId, timezone, query }: { siteId: string; timezo
   const [shutdownTeam, setShutdownTeam] = useState('');
   const [exemptCancel, setExemptCancel] = useState(false);
   const teams = useList<any>(`${M}/teams?site_id=${siteId}`);
+  const directory = useList<{ id: string; display_name: string }>(`/api/v1/identity/directory?site_id=${siteId}`);
+  const owner = (assigneeId: string | null | undefined) => ownerLabel(assigneeId, directory.items, directory.loading);
   const [planForm, setPlanForm] = useState({
     procedure_revision_id: '',
     planned_start: '',
     planned_end: '',
     safety_instructions: 'Wear PPE. Isolate energy before opening the housing.',
+    scope: '',
+    team_id: '',
   });
+  const [assigneeId, setAssigneeId] = useState('');
 
   useEffect(() => {
     api<{ shifts?: ShiftWindow[] }>(`${M}/sites/${siteId}/settings`)
@@ -185,7 +201,10 @@ export function WorkOrders({ siteId, timezone, query }: { siteId: string; timezo
         planned_start: wo.planned_start ? wo.planned_start.slice(0, 16) : '',
         planned_end: wo.planned_end ? wo.planned_end.slice(0, 16) : '',
         safety_instructions: wo.safety_instructions ?? wo.procedure_snapshot?.safety_instructions ?? 'Wear PPE. Isolate energy before opening the housing.',
+        scope: wo.scope ?? '',
+        team_id: wo.team_id ?? '',
       });
+      setAssigneeId(wo.assignee_id ?? '');
       const vals: Record<string, string> = {};
       for (const step of wo.procedure_snapshot?.steps ?? []) {
         const existing = (wo.task_results ?? []).find((r: any) => r.step_key === step.key);
@@ -196,6 +215,33 @@ export function WorkOrders({ siteId, timezone, query }: { siteId: string; timezo
       setErr(e);
     }
   };
+
+  useEffect(() => {
+    if (openId) void open(openId);
+  }, [openId]);
+
+  useEffect(() => {
+    if (!selected?.id) {
+      setMovements([]);
+      return;
+    }
+    let cancelled = false;
+    api<{ items: Array<{ id: string; movement_type: string; quantity: number; unit: string }> }>(`${M}/stock-movements?work_order_id=${selected.id}`)
+      .then((listed) => {
+        if (!cancelled) setMovements(listed.items ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setMovements([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.id]);
+
+  useEffect(() => {
+    if (!focusId) return;
+    document.getElementById(`source-${focusId}`)?.scrollIntoView({ block: 'nearest' });
+  }, [focusId, selected, movements]);
 
   const loadBriefing = async () => {
     if (!selected?.asset_id) return;
@@ -241,7 +287,28 @@ export function WorkOrders({ siteId, timezone, query }: { siteId: string; timezo
           planned_start: toIso(planForm.planned_start),
           planned_end: toIso(planForm.planned_end),
           safety_instructions: planForm.safety_instructions || null,
+          scope: planForm.scope,
+          team_id: planForm.team_id,
         }),
+      });
+      await open(selected.id);
+      list.reload();
+    } catch (e) {
+      if (e instanceof ApiError && e.code === 'version_conflict') {
+        setConflict(e.message);
+        await open(selected.id);
+      } else setErr(e);
+    }
+  };
+
+  const saveOwner = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!selected) return;
+    setErr(null);
+    try {
+      await api(`${M}/work-orders/${selected.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ record_version: selected.version, assignee_id: assigneeId || null }),
       });
       await open(selected.id);
       list.reload();
@@ -459,7 +526,7 @@ export function WorkOrders({ siteId, timezone, query }: { siteId: string; timezo
           )}
         </div>
       </form>
-      <ErrorBox err={list.err ?? err} />
+      <ErrorBox err={list.err ?? directory.err ?? err} />
       {view === 'list' && (
         <form className="card" onSubmit={(e) => void createShutdown(e)}>
           <h4>New shutdown</h4>
@@ -487,10 +554,11 @@ export function WorkOrders({ siteId, timezone, query }: { siteId: string; timezo
           onDragStart={setDragging}
           onDrop={(id, day, shift) => void moveOnBoard(id, day, shift)}
           onOpen={(id) => void open(id)}
+          owner={owner}
         />
       )}
       {view === 'list' && <Table>
-        <thead><tr><th>No.</th><th>Title</th><th>Asset</th><th>Origin</th><th>State</th><th>Assignee</th><th>Due</th></tr></thead>
+        <thead><tr><th>No.</th><th>Title</th><th>Asset</th><th>Origin</th><th>State</th><th>Owner</th><th>Due</th></tr></thead>
         <tbody>
           {list.items.map((w) => (
             <tr key={w.id}>
@@ -499,7 +567,7 @@ export function WorkOrders({ siteId, timezone, query }: { siteId: string; timezo
               <td>{workAsset(w)}</td>
               <td>{workOrigin(w)}</td>
               <td><Badge state={w.state} />{w.overdue ? ' overdue' : ''}</td>
-              <td>{w.assignee_id ?? 'team queue'}</td>
+              <td>{owner(w.assignee_id)}</td>
               <td>{w.due_at ?? '—'}</td>
             </tr>
           ))}
@@ -509,6 +577,7 @@ export function WorkOrders({ siteId, timezone, query }: { siteId: string; timezo
       {selected && (
         <Panel title={`WO-${selected.display_number} ${selected.title}`} onClose={() => setSelected(null)}>
           <p><Badge state={selected.state} /> v{selected.version}</p>
+          <p>Owner {owner(selected.assignee_id)} · {teams.items.find((team) => team.id === selected.team_id)?.name ?? 'No team'}</p>
           <p>{selected.scope}</p>
           {selected.non_asset_category === 'shutdown' && !selected.asset_id && (
             <form className="card" onSubmit={(e) => void linkChild(e)}>
@@ -553,9 +622,38 @@ export function WorkOrders({ siteId, timezone, query }: { siteId: string; timezo
               {selected.procedure_snapshot.safety_instructions ? ` — ${selected.procedure_snapshot.safety_instructions}` : ''}
             </p>
           )}
+          {['draft', 'pending_approval', 'ready', 'in_progress', 'on_hold'].includes(selected.state) && (
+            <form className="card" onSubmit={(e) => void saveOwner(e)}>
+              <h4>Owner</h4>
+              <label>Assign
+                <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
+                  <option value="">Team queue</option>
+                  {directory.items.map((person) => <option key={person.id} value={person.id}>{person.display_name}</option>)}
+                </select>
+              </label>
+              <button type="submit">Save owner</button>
+            </form>
+          )}
+          {(selected.failure_event_ids ?? []).length > 0 && (
+            <div className="card">
+              <h4>Linked downtime</h4>
+              <ul>
+                {(selected.failure_event_ids as string[]).map((id) => (
+                  <li key={id}><a href={`#/downtime?event=${id}`}>Downtime event</a></li>
+                ))}
+              </ul>
+            </div>
+          )}
           {['draft', 'pending_approval', 'returned'].includes(selected.state) && (
             <form className="card" onSubmit={(e) => void savePlanning(e)}>
               <h4>Planning (required before approve)</h4>
+              <label>Scope<textarea value={planForm.scope} onChange={(e) => setPlanForm({ ...planForm, scope: e.target.value })} required minLength={1} /></label>
+              <label>Team
+                <select value={planForm.team_id} onChange={(e) => setPlanForm({ ...planForm, team_id: e.target.value })} required>
+                  <option value="">—</option>
+                  {teams.items.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+                </select>
+              </label>
               <label>Published procedure revision
                 <select
                   value={planForm.procedure_revision_id}
@@ -610,7 +708,7 @@ export function WorkOrders({ siteId, timezone, query }: { siteId: string; timezo
             <div className="card">
               <h4>Completion signature</h4>
               {selected.completion_signature?.snapshot_hash === selected.procedure_snapshot_hash ? (
-                <p>Signed by {selected.completion_signature.signer_id} at {selected.completion_signature.signed_at}.</p>
+                <p>Signed by {owner(selected.completion_signature.signer_id)} at {selected.completion_signature.signed_at}.</p>
               ) : (
                 <button type="button" onClick={() => void signCompletion()}>Sign issued procedure</button>
               )}
@@ -653,8 +751,32 @@ export function WorkOrders({ siteId, timezone, query }: { siteId: string; timezo
               <label>Note<input value={laborNote} onChange={(e) => setLaborNote(e.target.value)} /></label>
             </div>
             <button type="submit">Add labor</button>
-            <ul>{(selected.labor ?? []).map((l: any) => <li key={l.id}>{l.duration_minutes} min {l.note ?? ''}</li>)}</ul>
+            <ul>{(selected.labor ?? []).map((l: any) => <li key={l.id} id={`source-${l.id}`} className={focusId === l.id ? 'source-focus' : undefined}>{l.duration_minutes} min {l.note ?? ''}</li>)}</ul>
           </form>}
+          {movements.length > 0 && (
+            <div className="card">
+              <h4>Parts movements</h4>
+              <ul>
+                {movements.map((movement) => (
+                  <li key={movement.id} id={`source-${movement.id}`} className={focusId === movement.id ? 'source-focus' : undefined}>
+                    {movement.movement_type} {movement.quantity} {movement.unit}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {(selected.external_costs ?? []).length > 0 && (
+            <div className="card">
+              <h4>External service costs</h4>
+              <ul>
+                {(selected.external_costs as Array<{ id: string; amount: number; currency: string; description: string | null }>).map((cost) => (
+                  <li key={cost.id} id={`source-${cost.id}`} className={focusId === cost.id ? 'source-focus' : undefined}>
+                    {cost.amount} {cost.currency} {cost.description ?? ''}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {!(selected.non_asset_category === 'shutdown' && !selected.asset_id) && <div className="card">
             <h4>Evidence</h4>
             <label>Photo / document<input type="file" accept="image/*,.pdf,.txt,.md" onChange={(e) => void onPhoto(e.target.files?.[0] ?? null)} /></label>
@@ -697,6 +819,7 @@ function PlanningBoard({
   onDragStart,
   onDrop,
   onOpen,
+  owner,
 }: {
   items: any[];
   days: string[];
@@ -706,6 +829,7 @@ function PlanningBoard({
   onDragStart: (id: string) => void;
   onDrop: (id: string, day: string, shift: ShiftWindow) => void;
   onOpen: (id: string) => void;
+  owner: (assigneeId: string | null | undefined) => string;
 }) {
   const openItems = items.filter((item) => !['closed', 'cancelled'].includes(item.state));
   const unscheduled = openItems.filter((item) => !item.planned_start);
@@ -727,7 +851,7 @@ function PlanningBoard({
             <button type="button" className="secondary" onClick={() => onOpen(item.id)}>WO-{item.display_number}</button>
             <span>{item.title}</span>
             {boardMark(item) && <span className="muted">{boardMark(item)}</span>}
-            <span className="muted">{item.assignee_id ?? 'team queue'}</span>
+            <span className="muted">{owner(item.assignee_id)}</span>
           </article>
         ))}
         {!unscheduled.length && <p className="muted">None</p>}
@@ -755,7 +879,7 @@ function PlanningBoard({
                     <button type="button" className="secondary" onClick={() => onOpen(item.id)}>WO-{item.display_number}</button>
                     <span>{item.title}</span>
                     {boardMark(item) && <span className="muted">{boardMark(item)}</span>}
-                    <span className="muted">{item.assignee_id ?? 'team queue'}</span>
+                    <span className="muted">{owner(item.assignee_id)}</span>
                   </article>
                 ))}
               </div>
@@ -773,6 +897,7 @@ function PlanningBoard({
                 <button type="button" className="secondary" onClick={() => onOpen(item.id)}>WO-{item.display_number}</button>
                 <span>{item.title}</span>
                 {boardMark(item) && <span className="muted">{boardMark(item)}</span>}
+                <span className="muted">{owner(item.assignee_id)}</span>
                 <span className="muted">Outside the shift windows</span>
               </article>
             ))}

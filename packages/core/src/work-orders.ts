@@ -285,6 +285,13 @@ export async function getWorkOrder(s: Services, actor: Actor, id: string) {
     s.db.query(`SELECT action, from_state, to_state, from_version, to_version, cycle, actor_id, actor_kind, reason, detail, occurred_at FROM maintenance.work_order_transition WHERE tenant_id = $1 AND work_order_id = $2 ORDER BY to_version`, [tenantId, wo.id]),
     s.db.query(`SELECT cycle, submitted_by, verifier_id, verified_at, outcome, self_approval_exception FROM maintenance.work_order_closure WHERE tenant_id = $1 AND work_order_id = $2 ORDER BY cycle`, [tenantId, wo.id]),
   ]);
+  const externalCosts = showCost
+    ? (await s.db.query(
+      `SELECT id, amount::float8 AS amount, currency, description FROM maintenance.external_service_cost
+        WHERE tenant_id = $1 AND work_order_id = $2 AND approved ORDER BY id`,
+      [tenantId, wo.id],
+    )).rows
+    : [];
   const supersededLabor = new Set(labor.rows.map((l) => l.amends_entry_id).filter(Boolean));
   const failureLinks = (
     await s.db.query(`SELECT failure_event_id FROM maintenance.order_failure_link WHERE tenant_id = $1 AND work_order_id = $2`, [tenantId, wo.id])
@@ -297,6 +304,7 @@ export async function getWorkOrder(s: Services, actor: Actor, id: string) {
     ...(await workOrderDto(s.db, actor, wo, s.clock.now())),
     task_results: [...results.values()].map((r) => ({ id: r.id, step_key: r.step_key, value: r.value, unit: r.unit, passed: r.passed, note: r.note, attachment_ids: r.attachment_ids, recorded_by: r.recorded_by, recorded_at: iso(r.recorded_at), amendment_reason: r.amendment_reason })),
     check_exceptions: exceptions.rows,
+    external_costs: externalCosts,
     labor: labor.rows.map((l) => ({
       id: l.id,
       person_id: l.person_id,

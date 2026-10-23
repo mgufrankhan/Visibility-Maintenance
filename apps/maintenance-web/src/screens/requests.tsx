@@ -1,6 +1,6 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { M, api } from '../api.ts';
-import { Badge, ErrorBox, PageHeader, Panel, Table, emptyRow, isoLocal, useList } from '../ui.tsx';
+import { Badge, ErrorBox, PageHeader, Panel, Table, emptyRow, isoLocal, uploadEvidence, useList } from '../ui.tsx';
 
 const REQUEST_STATES = ['submitted', 'under_review', 'accepted', 'rejected', 'duplicate'];
 
@@ -17,6 +17,7 @@ function requestFilter(siteId: string, query: string): { path: string; note: str
 
 export function Requests({ siteId, query }: { siteId: string; query: string }) {
   const filter = requestFilter(siteId, query);
+  const openId = new URLSearchParams(query).get('open');
   const list = useList<any>(filter.path);
   const teams = useList<any>(`${M}/teams?site_id=${siteId}`);
   const [description, setDescription] = useState('');
@@ -31,25 +32,39 @@ export function Requests({ siteId, query }: { siteId: string; query: string }) {
   const [dupId, setDupId] = useState('');
   const [translationLanguage, setTranslationLanguage] = useState('');
   const [translationBody, setTranslationBody] = useState('');
+  const [photo, setPhoto] = useState<File | null>(null);
+  const [photoKey, setPhotoKey] = useState(0);
+  const [files, setFiles] = useState<Array<{ id: string; file_name: string; status: string }>>([]);
 
-  const open = async (id: string) => {
-    setErr(null);
+  const loadFiles = async (id: string) => {
+    const listed = await api<{ items: Array<{ id: string; file_name: string; status: string }> }>(`${M}/attachments?owner_type=request&owner_id=${id}`);
+    setFiles(listed.items ?? []);
+  };
+
+  const open = async (id: string, keepError = false) => {
+    if (!keepError) setErr(null);
     try {
       const r = await api<any>(`${M}/requests/${id}`);
       setSelected(r);
       setDraftTitle(r.description.slice(0, 80));
       setDraftScope(r.description);
       setTeamId(teams.items[0]?.id ?? '');
+      await loadFiles(id);
     } catch (e) {
       setErr(e);
     }
   };
 
+  useEffect(() => {
+    if (openId) void open(openId);
+  }, [openId]);
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setErr(null);
+    let created: { id: string } | null = null;
     try {
-      const created = await api<any>(`${M}/requests`, {
+      created = await api<{ id: string }>(`${M}/requests`, {
         method: 'POST',
         headers: { 'Idempotency-Key': crypto.randomUUID() },
         body: JSON.stringify({
@@ -61,12 +76,25 @@ export function Requests({ siteId, query }: { siteId: string; query: string }) {
           proposed_priority: 'normal',
         }),
       });
-      list.setItems((items) => [created, ...items]);
+      if (photo) await uploadEvidence('request', created.id, photo);
+      list.reload();
       setDescription('');
       setLocation('');
       setAssetId('');
+      setPhoto(null);
+      setPhotoKey((key) => key + 1);
+      await open(created.id);
     } catch (e) {
       setErr(e);
+      if (created) {
+        list.reload();
+        setDescription('');
+        setLocation('');
+        setAssetId('');
+        setPhoto(null);
+        setPhotoKey((key) => key + 1);
+        await open(created.id, true);
+      }
     }
   };
 
@@ -96,6 +124,9 @@ export function Requests({ siteId, query }: { siteId: string; query: string }) {
           <label>Location (required without asset)<input value={location} onChange={(e) => setLocation(e.target.value)} required={!assetId} /></label>
         </div>
         <label>Describe the fault<textarea value={description} onChange={(e) => setDescription(e.target.value)} required minLength={3} /></label>
+        <label>Photo or document (optional)
+          <input key={photoKey} type="file" accept="image/*,.pdf,.txt" onChange={(e) => setPhoto(e.target.files?.[0] ?? null)} />
+        </label>
         <button type="submit">Submit request</button>
         <ErrorBox err={err} />
       </form>
@@ -117,6 +148,36 @@ export function Requests({ siteId, query }: { siteId: string; query: string }) {
       {selected && (
         <Panel title={`Request ${selected.display_number} — triage`} onClose={() => setSelected(null)}>
           <p>{selected.description}</p>
+          <div className="card">
+            <h4>Attachments</h4>
+            {files.length === 0 && <p className="muted">No photo or document yet.</p>}
+            <ul>
+              {files.map((file) => (
+                <li key={file.id}>{file.file_name} <Badge state={file.status} /></li>
+              ))}
+            </ul>
+            {['submitted', 'under_review'].includes(selected.state) && (
+              <label>Add a file
+                <input
+                  type="file"
+                  accept="image/*,.pdf,.txt"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    void (async () => {
+                      setErr(null);
+                      try {
+                        await uploadEvidence('request', selected.id, file);
+                        await loadFiles(selected.id);
+                      } catch (error) {
+                        setErr(error);
+                      }
+                    })();
+                  }}
+                />
+              </label>
+            )}
+          </div>
           {(selected.working_languages?.length ?? 0) > 1 && (
             <div className="card">
               <h4>Translation</h4>

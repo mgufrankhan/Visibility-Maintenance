@@ -151,13 +151,13 @@ describe('maintenance cost parts', () => {
     expect(report.body.parts).toEqual([{ currency: 'USD', amount: 12.5, issue_count: 1, return_count: 1 }]);
     expect(report.body.coverage.parts_movements_without_cost).toBe(1);
     expect(report.body.source_records).toEqual([
-      { type: 'stock_movement', id: pricedIssue.body.id },
-      { type: 'stock_movement', id: pricedReturn.body.id },
+      { type: 'stock_movement', id: pricedIssue.body.id, work_order_id: pricedOrder },
+      { type: 'stock_movement', id: pricedReturn.body.id, work_order_id: pricedOrder },
     ].sort((a, b) => a.id.localeCompare(b.id)));
     expect(report.body.coverage.stock_movement_ids_without_cost).toEqual([bareIssue.body.id]);
     const elsewhere = await h.call(h.users.costSup, 'GET', `${M}/reports/maintenance_cost?site_id=${siteId}&asset_id=${other.id}&${period}`);
     expect(elsewhere.body.parts).toEqual([{ currency: 'USD', amount: 12.5, issue_count: 1, return_count: 0 }]);
-    expect(elsewhere.body.source_records).toEqual([{ type: 'stock_movement', id: otherIssue.body.id }]);
+    expect(elsewhere.body.source_records).toEqual([{ type: 'stock_movement', id: otherIssue.body.id, work_order_id: otherOrder }]);
   });
 });
 

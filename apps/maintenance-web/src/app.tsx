@@ -311,7 +311,7 @@ function Screen({ route, query, siteId, me, online, onQueued, timezone }: { rout
     case 'connectors':
       return <Connectors siteId={siteId} />;
     case 'downtime':
-      return <Downtime siteId={siteId} />;
+      return <Downtime siteId={siteId} query={query} />;
     case 'reports':
       return <Reports siteId={siteId} />;
     case 'neo':

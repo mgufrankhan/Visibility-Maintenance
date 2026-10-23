@@ -242,7 +242,8 @@ async function maintenanceCost(s: Services, sc: Scope) {
   const { rows: labor } = await s.db.query(
     `SELECT l.currency, sum(l.duration_minutes * l.hourly_rate / 60.0)::float8 AS amount, count(*)::int AS entries,
             count(*) FILTER (WHERE l.hourly_rate IS NULL)::int AS unrated,
-            coalesce(array_agg(l.id ORDER BY l.id) FILTER (WHERE l.hourly_rate IS NOT NULL AND l.currency IS NOT NULL), '{}') AS valued_ids,
+            coalesce(jsonb_agg(jsonb_build_object('id', l.id, 'work_order_id', l.work_order_id) ORDER BY l.id)
+              FILTER (WHERE l.hourly_rate IS NOT NULL AND l.currency IS NOT NULL), '[]'::jsonb) AS valued,
             coalesce(array_agg(l.id ORDER BY l.id) FILTER (WHERE l.hourly_rate IS NULL), '{}') AS unrated_ids
        FROM maintenance.labor_entry l JOIN maintenance.work_order w ON w.id = l.work_order_id
       WHERE l.tenant_id = $1 AND l.site_id = $2 AND ($3::uuid IS NULL OR w.asset_id = $3) AND w.state = 'closed' AND w.closed_at >= $4 AND w.closed_at < $5
@@ -251,7 +252,8 @@ async function maintenanceCost(s: Services, sc: Scope) {
     [sc.tenantId, sc.siteId, sc.assetId, sc.from, sc.to],
   );
   const { rows: external } = await s.db.query(
-    `SELECT c.currency, sum(c.amount)::float8 AS amount, coalesce(array_agg(c.id ORDER BY c.id), '{}') AS ids
+    `SELECT c.currency, sum(c.amount)::float8 AS amount,
+            coalesce(jsonb_agg(jsonb_build_object('id', c.id, 'work_order_id', c.work_order_id) ORDER BY c.id), '[]'::jsonb) AS valued
        FROM maintenance.external_service_cost c JOIN maintenance.work_order w ON w.id = c.work_order_id
       WHERE c.tenant_id = $1 AND c.site_id = $2 AND c.approved AND ($3::uuid IS NULL OR w.asset_id = $3) AND w.state = 'closed' AND w.closed_at >= $4 AND w.closed_at < $5 GROUP BY c.currency`,
     [sc.tenantId, sc.siteId, sc.assetId, sc.from, sc.to],
@@ -263,7 +265,8 @@ async function maintenanceCost(s: Services, sc: Scope) {
             count(*) FILTER (WHERE m.movement_type = 'issue' AND coalesce(m.unit_cost, recv.unit_cost) IS NOT NULL AND coalesce(m.currency, recv.currency) IS NOT NULL)::int AS issues,
             count(*) FILTER (WHERE m.movement_type = 'return' AND coalesce(m.unit_cost, recv.unit_cost) IS NOT NULL AND coalesce(m.currency, recv.currency) IS NOT NULL)::int AS returns,
             count(*) FILTER (WHERE coalesce(m.unit_cost, recv.unit_cost) IS NULL OR coalesce(m.currency, recv.currency) IS NULL)::int AS uncosted,
-            coalesce(array_agg(m.id ORDER BY m.id) FILTER (WHERE coalesce(m.unit_cost, recv.unit_cost) IS NOT NULL AND coalesce(m.currency, recv.currency) IS NOT NULL), '{}') AS valued_ids,
+            coalesce(jsonb_agg(jsonb_build_object('id', m.id, 'work_order_id', m.work_order_id) ORDER BY m.id)
+              FILTER (WHERE coalesce(m.unit_cost, recv.unit_cost) IS NOT NULL AND coalesce(m.currency, recv.currency) IS NOT NULL), '[]'::jsonb) AS valued,
             coalesce(array_agg(m.id ORDER BY m.id) FILTER (WHERE coalesce(m.unit_cost, recv.unit_cost) IS NULL OR coalesce(m.currency, recv.currency) IS NULL), '{}') AS uncosted_ids
        FROM maintenance.stock_movement m
        LEFT JOIN LATERAL (
@@ -284,7 +287,18 @@ async function maintenanceCost(s: Services, sc: Scope) {
   );
   const unrated = labor.reduce((a, l) => a + l.unrated, 0);
   const sorted = (ids: string[]) => [...ids].sort();
-  const source = (type: string, ids: string[]) => sorted(ids).map((id) => ({ type, id }));
+  const refs = (value: unknown): Array<{ id: string; work_order_id: string }> => {
+    const rows = typeof value === 'string' ? JSON.parse(value) as unknown : value;
+    if (!Array.isArray(rows)) return [];
+    return rows.flatMap((row) => {
+      if (!row || typeof row !== 'object') return [];
+      const id = 'id' in row ? row.id : null;
+      const workOrderId = 'work_order_id' in row ? row.work_order_id : null;
+      return typeof id === 'string' && typeof workOrderId === 'string' ? [{ id, work_order_id: workOrderId }] : [];
+    });
+  };
+  const source = (type: string, rows: Array<{ id: string; work_order_id: string }>) =>
+    [...rows].sort((a, b) => a.id.localeCompare(b.id)).map((row) => ({ type, id: row.id, work_order_id: row.work_order_id }));
   return {
     basis: 'Approved labor at the rate in effect when work started, plus approved external service cost, for work closed in the period. Parts issued in the period are net of returns, valued at the movement cost or the latest receipt cost for that part and store.',
     labor: labor.filter((l) => l.currency).map((l) => ({ currency: l.currency, amount: Math.round(l.amount * 100) / 100 })),
@@ -296,9 +310,9 @@ async function maintenanceCost(s: Services, sc: Scope) {
       return_count: p.returns,
     })),
     source_records: [
-      ...source('labor_entry', labor.flatMap((l) => l.valued_ids)),
-      ...source('external_service_cost', external.flatMap((e) => e.ids)),
-      ...source('stock_movement', parts.filter((p) => p.currency).flatMap((p) => p.valued_ids)),
+      ...source('labor_entry', labor.flatMap((l) => refs(l.valued))),
+      ...source('external_service_cost', external.flatMap((e) => refs(e.valued))),
+      ...source('stock_movement', parts.filter((p) => p.currency).flatMap((p) => refs(p.valued))),
     ].sort((a, b) => a.type.localeCompare(b.type) || a.id.localeCompare(b.id)),
     coverage: {
       labor_entries_without_rate: unrated,

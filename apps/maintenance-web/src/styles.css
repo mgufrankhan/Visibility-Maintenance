@@ -325,6 +325,8 @@ button.ghost {
 }
 button:disabled { opacity: 0.55; cursor: not-allowed; }
 
+.source-focus { background: var(--brand-soft); border-radius: 6px; padding: 0.15rem 0.4rem; }
+
 .table-wrap {
   overflow: auto;
   border: 1px solid var(--line);
