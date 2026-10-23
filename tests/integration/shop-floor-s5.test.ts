@@ -179,4 +179,28 @@ describe('shop floor S5 completion-relative plans', () => {
     expect(rows[1].occurrence_key).toBe('2026-02-28');
     expect(new Date(rows[1].due_at).toISOString()).toBe('2026-02-28T04:00:00.000Z');
   });
+
+  it('leaves an approved exemption out of PM compliance and keeps other cancellations in the count', async () => {
+    h.clock.set('2026-10-10T04:00:00Z');
+    const onTime = await publishedPlan('COMP-ON', { unit: 'day', interval: 30, anchor_date: '2026-10-10' });
+    const exempt = await publishedPlan('COMP-EXC', { unit: 'day', interval: 30, anchor_date: '2026-10-10' });
+    const missed = await publishedPlan('COMP-MISS', { unit: 'day', interval: 30, anchor_date: '2026-10-10' });
+    await run();
+    await closeReady((await orders(onTime.planId)).rows[0].id);
+    await act((await orders(exempt.planId)).rows[0].id, h.users.sup, 'cancel', { reason: 'Approved skip', exemption: true });
+    await act((await orders(missed.planId)).rows[0].id, h.users.sup, 'cancel', { reason: 'Missed window' });
+    const period = 'from=2026-10-01T00:00:00Z&to=2026-11-01T00:00:00Z';
+    const compliance = (assetId: string) => h.call(h.users.sup, 'GET', `${M}/reports/pm_compliance?site_id=${h.siteA1}&asset_id=${assetId}&${period}`);
+    const kept = await compliance(onTime.assetId);
+    expect(kept.status, JSON.stringify(kept.body)).toBe(200);
+    expect(kept.body).toMatchObject({ eligible: 1, on_time: 1, compliance_pct: 100, cancelled: 0, exemptions: 0, exemption_items: [] });
+    const skipped = await compliance(exempt.assetId);
+    expect(skipped.body).toMatchObject({ eligible: 0, on_time: 0, compliance_pct: null, cancelled: 0, exemptions: 1 });
+    expect(skipped.body.exemption_items).toEqual([
+      expect.objectContaining({ original_due_at: '2026-10-10T04:00:00.000Z', state: 'cancelled' }),
+    ]);
+    const counted = await compliance(missed.assetId);
+    expect(counted.body).toMatchObject({ eligible: 1, on_time: 0, compliance_pct: 0, cancelled: 1, exemptions: 0 });
+    expect(counted.body.items[0].original_due_at).toBe('2026-10-10T04:00:00.000Z');
+  });
 });

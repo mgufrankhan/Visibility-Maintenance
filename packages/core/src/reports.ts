@@ -184,23 +184,42 @@ async function overdueBacklog(s: Services, sc: Scope) {
   };
 }
 
+function occurrenceLine(r: Record<string, any>) {
+  return {
+    occurrence_id: r.id,
+    key: r.occurrence_key,
+    original_due_at: iso(r.due_at),
+    status: r.status,
+    work_order_id: r.work_order_id,
+    state: r.state,
+    closed_at: iso(r.closed_at),
+  };
+}
+
+function isApprovedExemption(r: Record<string, any>): boolean {
+  return r.state === 'cancelled' && r.cancel_exemption === true;
+}
+
 async function pmCompliance(s: Services, sc: Scope) {
   const { rows } = await s.db.query(
-    `SELECT o.id, o.occurrence_key, o.due_at, o.status, o.work_order_id, w.state, w.closed_at
+    `SELECT o.id, o.occurrence_key, o.due_at, o.status, o.work_order_id, w.state, w.closed_at, w.cancel_exemption
        FROM maintenance.pm_occurrence o LEFT JOIN maintenance.work_order w ON w.id = o.work_order_id
       WHERE o.tenant_id = $1 AND o.site_id = $2 AND ($3::uuid IS NULL OR o.asset_id = $3) AND o.due_at >= $4 AND o.due_at < $5 AND o.status NOT IN ('blocked_asset', 'blocked_shortage')`,
     [sc.tenantId, sc.siteId, sc.assetId, sc.from, sc.to],
   );
-  const onTime = rows.filter((r) => r.state === 'closed' && r.closed_at <= r.due_at);
+  const exempt = rows.filter(isApprovedExemption);
+  const eligible = rows.filter((r) => !isApprovedExemption(r));
+  const onTime = eligible.filter((r) => r.state === 'closed' && r.closed_at <= r.due_at);
   return {
-    eligible: rows.length,
+    eligible: eligible.length,
     on_time: onTime.length,
-    compliance_pct: rows.length ? Math.round((onTime.length / rows.length) * 1000) / 10 : null,
-    not_issued: rows.filter((r) => r.status !== 'issued').length,
-    cancelled: rows.filter((r) => r.state === 'cancelled').length,
-    exemptions: 0,
-    note: 'Cancellations count against compliance; approved exemptions are not yet supported.',
-    items: rows.map((r) => ({ occurrence_id: r.id, key: r.occurrence_key, original_due_at: iso(r.due_at), status: r.status, work_order_id: r.work_order_id, state: r.state, closed_at: iso(r.closed_at) })),
+    compliance_pct: eligible.length ? Math.round((onTime.length / eligible.length) * 1000) / 10 : null,
+    not_issued: eligible.filter((r) => r.status !== 'issued').length,
+    cancelled: eligible.filter((r) => r.state === 'cancelled').length,
+    exemptions: exempt.length,
+    note: 'Approved exemptions are left out of the eligible count. Other cancellations stay in the count.',
+    items: eligible.map(occurrenceLine),
+    exemption_items: exempt.map(occurrenceLine),
   };
 }
 
