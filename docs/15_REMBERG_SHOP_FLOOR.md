@@ -1,6 +1,6 @@
 # What to take from remberg
 
-Status: S1–S4 implemented (a shutdown parent coordinates asset children). S5 not started. Decisions D36–D42 remain proposed. Date: 23 October 2026.
+Status: S1–S5 completion trigger implemented (the next due follows the previous closure). Directory sign-in remains blocked. D41 is accepted. D36–D40 and D42 remain proposed. Date: 23 October 2026.
 
 This document records which public remberg capabilities belong in Visibility Maintenance, which stay outside it, and the order to build the included ones. It does not change the product requirements until a phase below is accepted. Core, Connected Operations, Neo and predictive models keep their existing gates.
 
@@ -154,14 +154,16 @@ Exit: two child assets record their own downtime; the parent adds none; early pa
 
 These two tracks are independent. Either may wait.
 
-**Completion-relative trigger.** Write the rule into D41 before code. Proposed rule, to adopt or revise at S5 entry:
+**Completion-relative trigger.** Adopted in D41. The verifier’s closure of a cycle is the anchor. The release-to-work `approved_at` is not.
 
-- The anchor is the approval time of the previous occurrence’s order.
-- A cancellation with an approved exemption does not move the anchor.
-- Reopening a closed order keeps the anchor at the original approval until the new cycle is approved.
+- The first occurrence is due on the plan anchor date and time of day, because no cycle has been closed.
+- Each later occurrence is due one interval after the previous closure, at the same time of day in the site timezone.
+- A cancellation without an exemption moves the anchor to the cancellation time.
+- A cancellation with an approved exemption does not move the anchor. That due may be issued again.
+- Reopening a closed order keeps the anchor at the original closure until the new cycle is closed.
 - At most one open occurrence per plan and asset remains in force.
-- The site timezone applies. Month-end clamping matches calendar plans.
-- The trigger is not combined with a meter trigger in this phase.
+- Month-end clamping matches calendar plans.
+- The trigger is not combined with a meter trigger.
 - Pause stops future generation and does not cancel the open order.
 
 Implement the trigger beside calendar and meter generation in `packages/core/src/pm.ts`.
@@ -174,7 +176,7 @@ Exit: a contracted test provider signs a mapped user into an existing tenant; an
 
 ## 6 Decisions
 
-Proposed until adopted in `docs/12_DECISIONS_AND_DISCOVERY.md`. S1–S4 were implemented against the rules in this document while D36–D40 are still proposed. D41 is accepted at S5 entry before completion-relative code. D42 stays blocked with D08.
+Proposed until adopted in `docs/12_DECISIONS_AND_DISCOVERY.md`. S1–S5 completion scheduling was implemented against the rules in this document. D41 is accepted. D36–D40 remain proposed. D42 stays blocked with D08.
 
 | ID | Choice |
 | --- | --- |
@@ -183,7 +185,7 @@ Proposed until adopted in `docs/12_DECISIONS_AND_DISCOVERY.md`. S1–S4 were imp
 | D38 | Lifecycle states stay fixed. The planning board writes schedule fields through the current patch and reapproval rules |
 | D39 | A required signature is completion evidence bound to the signer and the snapshot hash. Conditional steps extend `checkDefinition` and freeze on the issued snapshot. Hidden steps are not required. Failed visible checks still open one request |
 | D40 | Parts readiness warns by default. `pm_block_on_shortage` is off unless an administrator turns it on. No purchase or ERP goods issue is added here |
-| D41 | Completion-relative recurrence uses the rule in S5. Code waits until that rule is adopted |
+| D41 | Completion-relative recurrence uses the closure of the previous cycle as its anchor. The rule is accepted |
 | D42 | Directory sign-in stays on D08. This plan does not implement a provider without a customer directory |
 
 ## 7 Verification

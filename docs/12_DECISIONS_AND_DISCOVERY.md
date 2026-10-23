@@ -24,7 +24,7 @@ Decisions below are proposed implementation defaults derived from the PRD. Recor
 | D38 | Planning board uses the fixed lifecycle | Proposed; schedule edits follow current reapproval rules |
 | D39 | Signature and conditional steps freeze on the issued snapshot | Proposed; hidden steps are not required |
 | D40 | Parts readiness warns by default | Proposed; no purchase or ERP goods issue in this plan |
-| D41 | Completion-relative recurrence waits on a written rule | Proposed; rule text is in docs/15 S5 |
+| D41 | Completion-relative recurrence uses the previous cycle's closure | Adopted; first due is the anchor date; an exemption does not move it; directory sign-in stays blocked |
 | D42 | Directory sign-in stays blocked with D08 | Proposed; no IdP without a customer directory |
 
 ## Discovery outputs
@@ -89,7 +89,7 @@ Owner: product + implementation. S1 and S2 are in code while these decisions sta
 | D38 | PRD work-order lifecycle; material schedule changes require reapproval | The board writes `planned_start` and `planned_end` through the current patch. It adds no state | Avoids a second, unaudited status model | `tests/integration/shop-floor.test.ts` | Proposed |
 | D39 | Existing `acknowledgment` checks and immutable procedure snapshots | A required signature binds signer, time and snapshot hash. `visible_when` on a check freezes in the snapshot. Hidden checks are not required. A failed visible mandatory check still opens one request | Completion evidence stays traceable after a procedure edit | `tests/integration/shop-floor.test.ts` | Proposed |
 | D40 | Phase 8 parts ledger; PM generation already records generation issues | Shortage is visible. `pm_block_on_shortage` defaults off. This plan posts no purchase and no ERP goods issue | Planned work is not stopped by stock unless an administrator says so | `tests/integration/shop-floor-s3.test.ts` | Proposed |
-| D41 | PRD defers completion-relative schedules until semantics exist | Adopt or revise the S5 rule before code. Calendar and meter triggers stay as they are | One open occurrence and month-end behavior stay defined | Deferred until S5 entry | Proposed |
+| D41 | PRD defers completion-relative schedules until semantics exist | The anchor is the closure time of the previous occurrence. The first due is the plan anchor. A non-exempt cancellation moves the anchor to the cancellation; an approved exemption does not. Reopening keeps the original closure until the new cycle is closed. One open occurrence per plan and asset. Month-end clamp matches calendar plans. Not combined with a meter. Pause does not cancel the open order | Calendar and meter triggers stay as they are | `tests/integration/shop-floor-s5.test.ts` | Adopted |
 | D42 | D08 external authorization-code flow is not implemented | Directory sign-in waits for a customer IdP. Local accounts remain | Matches the existing blocked gate | Deferred until a directory exists | Proposed |
 
 Open pilot questions (need owners): working languages, which procedures require a signature, and whether multi-asset shutdowns are in the first pilot — listed in docs/15 S0.

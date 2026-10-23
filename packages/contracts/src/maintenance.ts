@@ -322,6 +322,8 @@ export const transitionRequest = z.object({
   reason: z.string().max(2000).nullable().default(null),
   completion: completionDetails.nullable().default(null),
   closure_outcome: z.enum(['restored', 'partially_restored', 'not_restored', 'not_applicable']).nullable().default(null),
+  /** Set on cancel when an approver records that this cancellation does not move a completion schedule. */
+  exemption: z.boolean().default(false),
 });
 export type TransitionRequest = z.infer<typeof transitionRequest>;
 
@@ -391,17 +393,20 @@ export const meterTrigger = z.object({
   due_days: z.number().int().min(0).max(365).default(7),
 });
 
-export const planTrigger = z.discriminatedUnion('type', [calendarTrigger, meterTrigger]);
+/** Next due follows the previous cycle's closure. The first due is the anchor date. */
+export const completionTrigger = calendarTrigger.extend({ type: z.literal('completion') });
+
+export const planTrigger = z.discriminatedUnion('type', [calendarTrigger, meterTrigger, completionTrigger]);
 
 export const createPlanRequest = z
   .object({
     site_id: z.uuid(),
     asset_id: z.uuid(),
     title: z.string().min(1).max(200),
-    trigger_kind: z.enum(['calendar', 'meter']).default('calendar'),
+    trigger_kind: z.enum(['calendar', 'meter', 'completion']).default('calendar'),
     meter_id: z.uuid().nullable().default(null),
   })
-  .refine((p) => (p.trigger_kind === 'meter') === (p.meter_id !== null), { message: 'Meter plans require meter_id; calendar plans must not set it', path: ['meter_id'] });
+  .refine((p) => (p.trigger_kind === 'meter') === (p.meter_id !== null), { message: 'Meter plans require meter_id; other plans must not set it', path: ['meter_id'] });
 
 export const expectedPart = z.object({
   part_id: z.uuid(),

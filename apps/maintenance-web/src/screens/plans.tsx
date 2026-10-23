@@ -22,6 +22,7 @@ export function Plans({ siteId }: { siteId: string }) {
   const [reason, setReason] = useState('Paused from web planner');
   const [partId, setPartId] = useState('');
   const [partQty, setPartQty] = useState('1');
+  const [kind, setKind] = useState<'calendar' | 'completion'>('calendar');
 
   const open = async (id: string) => {
     setErr(null);
@@ -39,7 +40,7 @@ export function Plans({ siteId }: { siteId: string }) {
     try {
       const plan = await api<any>(`${M}/plans`, {
         method: 'POST',
-        body: JSON.stringify({ site_id: siteId, asset_id: assetId, title, trigger_kind: 'calendar' }),
+        body: JSON.stringify({ site_id: siteId, asset_id: assetId, title, trigger_kind: kind }),
       });
       const rev = await api<any>(`${M}/plans/${plan.id}/revisions`, {
         method: 'POST',
@@ -50,7 +51,7 @@ export function Plans({ siteId }: { siteId: string }) {
           team_id: teamId,
           estimated_minutes: 30,
           lead_days: 7,
-          trigger: { type: 'calendar', unit, interval: Number(interval), anchor_date: anchor, time_of_day: timeOfDay },
+          trigger: { type: kind, unit, interval: Number(interval), anchor_date: anchor, time_of_day: timeOfDay },
           effective_from: anchor,
           expected_parts: partId ? [{ part_id: partId, quantity: Number(partQty) }] : [],
         }),
@@ -101,9 +102,15 @@ export function Plans({ siteId }: { siteId: string }) {
 
   return (
     <>
-      <PageHeader title="Preventive maintenance" lede="Publish calendar and meter-based plans. Pause stops generation without deleting history." />
+      <PageHeader title="Preventive maintenance" lede="Publish calendar, completion, and meter-based plans. A completion plan's next due follows the previous closure. Pause stops generation and leaves the open order in place." />
       <form className="card" onSubmit={(e) => void create(e)}>
-        <h3>New calendar plan</h3>
+        <h3>New plan</h3>
+        <label>Schedule
+          <select value={kind} onChange={(e) => setKind(e.target.value as 'calendar' | 'completion')}>
+            <option value="calendar">Calendar</option>
+            <option value="completion">Completion</option>
+          </select>
+        </label>
         <label>Title<input value={title} onChange={(e) => setTitle(e.target.value)} required /></label>
         <label>Asset
           <select value={assetId} onChange={(e) => setAssetId(e.target.value)} required>

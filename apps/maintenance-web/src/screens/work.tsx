@@ -92,6 +92,7 @@ export function WorkOrders({ siteId, timezone }: { siteId: string; timezone: str
   const [childId, setChildId] = useState('');
   const [shutdownTitle, setShutdownTitle] = useState('Planned shutdown');
   const [shutdownTeam, setShutdownTeam] = useState('');
+  const [exemptCancel, setExemptCancel] = useState(false);
   const teams = useList<any>(`${M}/teams?site_id=${siteId}`);
   const [planForm, setPlanForm] = useState({
     procedure_revision_id: '',
@@ -486,6 +487,12 @@ export function WorkOrders({ siteId, timezone }: { siteId: string; timezone: str
               <button type="submit">Save planning</button>
             </form>
           )}
+          {(selected.available_actions ?? []).includes('cancel') && (
+            <label className="muted">
+              <input type="checkbox" checked={exemptCancel} onChange={(e) => setExemptCancel(e.target.checked)} />
+              Approved exemption. This cancellation does not move a completion schedule.
+            </label>
+          )}
           <div className="row">
             {(selected.available_actions ?? []).map((a: string) => {
               if (a === 'submit_completion') {
@@ -501,6 +508,9 @@ export function WorkOrders({ siteId, timezone }: { siteId: string; timezone: str
               }
               if (a === 'close') {
                 return <button key={a} type="button" onClick={() => void act(a, { closure_outcome: 'restored' })}>close</button>;
+              }
+              if (a === 'cancel') {
+                return <button key={a} type="button" onClick={() => void act(a, { exemption: exemptCancel })}>cancel</button>;
               }
               return <button key={a} type="button" onClick={() => void act(a)}>{a.replace(/_/g, ' ')}</button>;
             })}

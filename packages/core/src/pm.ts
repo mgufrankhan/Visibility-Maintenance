@@ -11,7 +11,7 @@ import { identitySnapshot, resolveAsset, siteInfo, type AssetIdentity } from './
 import { assertPartsStockedAtSite, expectedPartsOf, shortageText } from './parts-coverage.ts';
 import { issuableRevision } from './procedures.ts';
 import { enqueueEvent, iso, writeAudit } from './records.ts';
-import { nextOccurrences, occurrencesBetween, validateTrigger, type CalendarTrigger, type HolidayRule, type Occurrence } from './recurrence.ts';
+import { completionAnchorDue, completionNextDue, nextOccurrences, occurrencesBetween, validateTrigger, type CalendarTrigger, type CompletionTrigger, type HolidayRule, type Occurrence } from './recurrence.ts';
 import type { MeterTrigger } from './meters.ts';
 import { loadSiteSettings } from './settings.ts';
 import { insertWorkOrder } from './work-orders.ts';
@@ -103,12 +103,22 @@ export async function addPlanRevision(s: Services, actor: Actor, planId: string,
   requirePermission(p, 'maintenance.plan.manage', plan.site_id);
   if (plan.status === 'archived') throw conflict('plan_archived', 'Archived plans cannot be revised');
   if (input.trigger.type !== plan.trigger_kind) throw invalid(`This plan uses a ${plan.trigger_kind} trigger`, { trigger: [`Expected a ${plan.trigger_kind} trigger`] });
-  if (input.trigger.type === 'calendar') {
-    const site = await siteInfo(s, actor, plan.site_id);
-    try {
-      validateTrigger(input.trigger, site.timezone);
-    } catch (err) {
-      throw invalid((err as Error).message, { trigger: [(err as Error).message] });
+  switch (input.trigger.type) {
+    case 'calendar':
+    case 'completion': {
+      const site = await siteInfo(s, actor, plan.site_id);
+      try {
+        validateTrigger({ ...input.trigger, type: 'calendar' }, site.timezone);
+      } catch (err) {
+        throw invalid((err as Error).message, { trigger: [(err as Error).message] });
+      }
+      break;
+    }
+    case 'meter':
+      break;
+    default: {
+      const never: never = input.trigger;
+      throw new Error(`Unhandled trigger ${String(never)}`);
     }
   }
   return withTransaction(s.db, async (tx) => {
@@ -220,6 +230,18 @@ export async function previewPlanRevision(s: Services, actor: Actor, revisionId:
   const { rows } = await s.db.query(`SELECT ${REVISION_COLS}, p.site_id FROM maintenance.pm_plan_revision r JOIN maintenance.pm_plan p ON p.id = r.plan_id WHERE r.tenant_id = $1 AND r.id::text = $2`, [actor.principal.tenantId, revisionId]);
   const rev = rows[0];
   if (!rev || !can(actor.principal, 'maintenance.view', rev.site_id)) throw notFound('Plan revision');
+  if (rev.trigger.type === 'completion') {
+    const site = await siteInfo(s, actor, rev.site_id);
+    const rule = await holidayRule(s.db, actor.principal.tenantId, rev.site_id);
+    const first = completionAnchorDue(rev.trigger, site.timezone, rule);
+    return withinEffective([first], rev).map((o) => ({
+      key: o.key,
+      nominal_date: o.nominalDate,
+      due_date: o.dueDate,
+      due_at: o.dueAt.toISOString(),
+      generate_at: new Date(o.dueAt.getTime() - rev.lead_days * 86_400_000).toISOString(),
+    }));
+  }
   if (rev.trigger.type !== 'calendar') return [];
   const site = await siteInfo(s, actor, rev.site_id);
   const rule = await holidayRule(s.db, actor.principal.tenantId, rev.site_id);
@@ -407,13 +429,143 @@ async function generateForPlan(s: Services, workerId: string, planId: string, as
   });
 }
 
+/**
+ * One completion-relative occurrence. The anchor is the latest closure, or the
+ * cancellation time when that cancellation has no exemption. An open order
+ * blocks the next issue. Pause is handled by the scheduler only selecting
+ * active plans, so the open order stays as it is.
+ */
+async function generateCompletionPlan(s: Services, workerId: string, planId: string, asset: AssetIdentity | null, assetError: string | null, sum: SchedulerSummary): Promise<void> {
+  await withTransaction(s.db, async (tx: PoolClient) => {
+    const { rows } = await tx.query(`SELECT * FROM maintenance.pm_plan WHERE id = $1 AND status = 'active' AND trigger_kind = 'completion' FOR UPDATE SKIP LOCKED`, [planId]);
+    const plan = rows[0];
+    if (!plan || !plan.current_revision_id) return;
+    sum.plans++;
+    const now = s.clock.now();
+    const system: SystemActor = { kind: 'system', tenantId: plan.tenant_id, label: `pm-scheduler:${workerId}`, correlationId: randomUUID() };
+    const wait = async (issue: string | null, retryAt: Date) => {
+      if (issue) {
+        sum.issues.push({ plan_id: plan.id, issue });
+        await recordIssue(tx, plan.id, issue, now, retryAt);
+      } else {
+        await tx.query(`UPDATE maintenance.pm_plan SET next_generate_at = $2, last_generation_issue = NULL, last_generation_issue_at = NULL WHERE id = $1`, [plan.id, retryAt]);
+      }
+    };
+    if (!(await s.entitlements.has(plan.tenant_id, 'core.generate_pm'))) {
+      sum.blocked++;
+      return wait('PM generation is blocked by the current license state', new Date(now.getTime() + 3600_000));
+    }
+    if (!asset) return wait(assetError ?? 'Asset identity unavailable', new Date(now.getTime() + 600_000));
+    const { rows: revRows } = await tx.query(`SELECT ${REVISION_COLS} FROM maintenance.pm_plan_revision r WHERE r.id = $1`, [plan.current_revision_id]);
+    const rev = revRows[0];
+    const trigger = rev.trigger as CompletionTrigger;
+    const site = await siteInfo(s, system, plan.site_id);
+    const rule = await holidayRule(tx, plan.tenant_id, plan.site_id);
+    const { rows: history } = await tx.query(
+      `SELECT o.occurrence_key, w.state, w.closed_at, w.cancel_exemption, w.updated_at
+         FROM maintenance.pm_occurrence o
+         LEFT JOIN maintenance.work_order w ON w.id = o.work_order_id
+        WHERE o.plan_id = $1 AND o.asset_id = $2`,
+      [plan.id, plan.asset_id],
+    );
+    if (history.some((row) => OPEN_STATES.includes(row.state))) {
+      return wait(null, new Date(now.getTime() + 3600_000));
+    }
+    let anchorAt: Date | null = null;
+    for (const row of history) {
+      if (row.state === 'closed' && row.closed_at) {
+        const closedAt = new Date(row.closed_at);
+        if (!anchorAt || closedAt > anchorAt) anchorAt = closedAt;
+      } else if (row.state === 'cancelled' && row.cancel_exemption !== true && row.updated_at) {
+        const cancelledAt = new Date(row.updated_at);
+        if (!anchorAt || cancelledAt > anchorAt) anchorAt = cancelledAt;
+      }
+    }
+    const due = anchorAt ? completionNextDue(trigger, site.timezone, rule, anchorAt) : completionAnchorDue(trigger, site.timezone, rule);
+    if (!withinEffective([due], rev).length) {
+      return wait(null, new Date(now.getTime() + 24 * 3600_000));
+    }
+    const generateAt = new Date(due.dueAt.getTime() - rev.lead_days * DAY);
+    if (generateAt > now) return wait(null, generateAt);
+    const fillsSlot = history.some((row) => {
+      const sameDue = row.occurrence_key === due.key || String(row.occurrence_key).startsWith(`${due.key}#`);
+      if (!sameDue) return false;
+      return !(row.state === 'cancelled' && row.cancel_exemption === true);
+    });
+    if (fillsSlot) return wait(null, new Date(now.getTime() + 3600_000));
+    const taken = new Set(history.map((row) => String(row.occurrence_key)));
+    let key = due.key;
+    let attempt = 2;
+    while (taken.has(key)) key = `${due.key}#${attempt++}`;
+
+    const procedureCheck = await issuableRevision(tx, plan.tenant_id, rev.procedure_revision_id, plan.site_id).then(
+      () => null,
+      (err: Error) => err.message,
+    );
+    if (procedureCheck) return wait(`Procedure revision cannot be issued: ${procedureCheck}. Publish a new plan revision.`, new Date(now.getTime() + 3600_000));
+    if (asset.lifecycle !== 'active') {
+      sum.blocked++;
+      return wait(`Asset is ${asset.lifecycle}`, new Date(now.getTime() + 3600_000));
+    }
+    const settings = await loadSiteSettings(tx, plan.tenant_id, plan.site_id);
+    const shortage = await shortageText(tx, plan.tenant_id, plan.site_id, expectedPartsOf(rev.expected_parts));
+    if (shortage) sum.issues.push({ plan_id: plan.id, issue: 'shortage' });
+    const blocked = Boolean(shortage && settings.pm_block_on_shortage);
+    const occId = await insertOccurrence(tx, plan, rev.id, { ...due, key }, blocked ? 'blocked_shortage' : 'issued', blocked ? shortage : null, workerId);
+    if (!occId) return wait(shortage, new Date(now.getTime() + 3600_000));
+    if (blocked) {
+      sum.blocked++;
+      return wait(shortage, new Date(now.getTime() + 3600_000));
+    }
+    const wo = await insertWorkOrder(tx, s, system, {
+      siteId: plan.site_id,
+      type: 'preventive',
+      priority: rev.priority,
+      title: rev.title,
+      description: `Generated from completion plan "${plan.title}" revision ${rev.revision_no} for ${due.dueDate}.`,
+      scope: rev.scope,
+      asset,
+      nonAssetCategory: null,
+      nonAssetJustification: null,
+      locationText: asset.location,
+      teamId: rev.team_id,
+      assigneeId: null,
+      plannedStart: due.dueAt,
+      plannedEnd: new Date(due.dueAt.getTime() + rev.estimated_minutes * 60_000),
+      dueAt: due.dueAt,
+      procedureRevisionId: rev.procedure_revision_id,
+      safetyInstructions: null,
+      sourceRequestId: null,
+      planOccurrenceId: occId,
+      followUpOfId: null,
+      initialState: settings.pm_initial_state,
+      creationReason: `PM plan ${plan.id} revision ${rev.revision_no}, completion occurrence ${key}`,
+    });
+    await tx.query(`UPDATE maintenance.pm_occurrence SET status = 'issued', reason = NULL, work_order_id = $2 WHERE id = $1`, [occId, wo.id]);
+    await enqueueEvent(tx, system, {
+      siteId: plan.site_id,
+      type: 'maintenance.plan.occurrence_due',
+      aggregateType: 'pm_occurrence',
+      aggregateId: occId,
+      aggregateVersion: 1,
+      occurredAt: now,
+      payload: { plan_id: plan.id, occurrence_key: key, due_at: due.dueAt.toISOString(), work_order_id: wo.id, display_number: wo.display_number },
+    });
+    sum.issued++;
+    await tx.query(
+      `UPDATE maintenance.pm_plan SET last_occurrence_due_at = $2, next_generate_at = $3, last_generation_issue = $4, last_generation_issue_at = $5 WHERE id = $1`,
+      [plan.id, due.dueAt, now, shortage, shortage ? now : null],
+    );
+  });
+}
+
 /** One scheduler pass. Safe to run concurrently on several workers. */
 export async function runPmScheduler(s: Services, workerId: string, opts: { tenantId?: string; limit?: number } = {}): Promise<SchedulerSummary> {
   const sum: SchedulerSummary = { plans: 0, issued: 0, missed: 0, skipped: 0, blocked: 0, issues: [] };
   const now = s.clock.now();
   const { rows } = await s.db.query(
-    `SELECT id, tenant_id, asset_id FROM maintenance.pm_plan
-      WHERE status = 'active' AND trigger_kind = 'calendar' AND current_revision_id IS NOT NULL AND (next_generate_at IS NULL OR next_generate_at <= $1)
+    `SELECT id, tenant_id, asset_id, trigger_kind FROM maintenance.pm_plan
+      WHERE status = 'active' AND trigger_kind IN ('calendar', 'completion') AND current_revision_id IS NOT NULL AND (next_generate_at IS NULL OR next_generate_at <= $1)
         AND ($2::uuid IS NULL OR tenant_id = $2) ORDER BY next_generate_at NULLS FIRST LIMIT $3`,
     [now, opts.tenantId ?? null, opts.limit ?? 200],
   );
@@ -426,7 +578,8 @@ export async function runPmScheduler(s: Services, workerId: string, opts: { tena
     } catch (err) {
       assetError = err instanceof AppError ? err.message : 'Asset identity unavailable';
     }
-    await generateForPlan(s, workerId, r.id, asset, assetError, sum);
+    if (r.trigger_kind === 'completion') await generateCompletionPlan(s, workerId, r.id, asset, assetError, sum);
+    else await generateForPlan(s, workerId, r.id, asset, assetError, sum);
   }
   return sum;
 }

@@ -253,6 +253,7 @@ export async function workOrderDto(db: Queryable, actor: Actor, wo: Record<strin
     closed_at: iso(wo.closed_at),
     closure_outcome: wo.closure_outcome,
     cancel_reason: wo.cancel_reason,
+    cancel_exemption: wo.cancel_exemption === true,
     version: wo.version,
     created_at: iso(wo.created_at),
     created_by: wo.created_by,
@@ -694,6 +695,10 @@ export async function transitionWorkOrder(s: Services, actor: Actor, id: string,
           break;
         case 'cancel':
           set.cancel_reason = reason;
+          if (req.exemption) {
+            if (!can(p, 'maintenance.work_order.approve', wo.site_id)) throw forbidden('An approved exemption requires an approver');
+            set.cancel_exemption = true;
+          }
           break;
         default: {
           const never: never = req.action;

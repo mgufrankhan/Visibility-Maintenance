@@ -111,3 +111,54 @@ export function validateTrigger(t: CalendarTrigger, zone: string): void {
 export function localDate(at: Date, zone: string): string {
   return DateTime.fromJSDate(at, { zone }).toISODate()!;
 }
+
+export interface CompletionTrigger {
+  type: 'completion';
+  unit: 'day' | 'week' | 'month';
+  interval: number;
+  /** Local date of the first occurrence, before any cycle has been closed. */
+  anchor_date: string;
+  time_of_day: string;
+}
+
+function asCalendar(t: CompletionTrigger): CalendarTrigger {
+  return { type: 'calendar', unit: t.unit, interval: t.interval, anchor_date: t.anchor_date, time_of_day: t.time_of_day };
+}
+
+function addInterval(day: DateTime, unit: CompletionTrigger['unit'], interval: number): DateTime {
+  switch (unit) {
+    case 'day':
+      return day.plus({ days: interval });
+    case 'week':
+      return day.plus({ weeks: interval });
+    case 'month':
+      return day.plus({ months: interval });
+    default: {
+      const never: never = unit;
+      throw new Error(`Unsupported unit ${String(never)}`);
+    }
+  }
+}
+
+/** First due date: the plan anchor, because no cycle has been closed yet. */
+export function completionAnchorDue(t: CompletionTrigger, zone: string, rule: HolidayRule): Occurrence {
+  return occurrenceAt(asCalendar(t), zone, rule, 0);
+}
+
+/**
+ * Next due date after a closure or a non-exempt cancellation.
+ * Months clamp the way calendar plans do: 31 Jan plus one month is 28 Feb
+ * in a non-leap year, not 3 Mar.
+ */
+export function completionNextDue(t: CompletionTrigger, zone: string, rule: HolidayRule, anchorAt: Date): Occurrence {
+  validateTrigger(asCalendar(t), zone);
+  const nominalDay = addInterval(DateTime.fromJSDate(anchorAt, { zone }).startOf('day'), t.unit, t.interval);
+  const due = applyHolidays(nominalDay, rule);
+  return {
+    index: 0,
+    key: nominalDay.toISODate()!,
+    nominalDate: nominalDay.toISODate()!,
+    dueDate: due.toISODate()!,
+    dueAt: atLocalTime(due, t.time_of_day, zone),
+  };
+}
