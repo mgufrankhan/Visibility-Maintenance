@@ -156,6 +156,29 @@ describe('KPI reconciliation (AC-11)', () => {
     expect((await report('mtbf', '&priority=high')).status).toBe(422);
   });
 
+  it('audits a due-date edit and records whether a cancellation is exempt', async () => {
+    const created = await h.call(h.users.sup, 'POST', `${M}/work-orders`, {
+      site_id: h.siteA1,
+      asset_id: k1,
+      title: 'Due date audit',
+      priority: 'normal',
+      team_id: h.teamA1,
+      scope: 'Repair the fault',
+      due_at: '2026-10-01T00:00:00Z',
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const moved = await h.call(h.users.sup, 'PATCH', `${M}/work-orders/${created.body.id}`, { due_at: '2026-11-01T00:00:00Z' }, { 'if-match': `"${created.body.version}"` });
+    expect(moved.status, JSON.stringify(moved.body)).toBe(200);
+    const edited = await h.db.query(`SELECT detail FROM maintenance.audit_event WHERE action = 'work_order.edited' AND target_id = $1 ORDER BY occurred_at DESC LIMIT 1`, [created.body.id]);
+    expect(edited.rows[0].detail.due_at).toEqual({ from: '2026-10-01T00:00:00.000Z', to: '2026-11-01T00:00:00.000Z' });
+    const cancelled = await h.call(h.users.sup, 'POST', `${M}/work-orders/${created.body.id}/transitions`, {
+      action: 'cancel', record_version: moved.body.version, reason: 'Approved skip', exemption: true,
+    });
+    expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
+    const audit = await h.db.query(`SELECT detail FROM maintenance.audit_event WHERE action = 'work_order.cancel' AND target_id = $1`, [created.body.id]);
+    expect(audit.rows[0].detail).toMatchObject({ due_at: '2026-11-01T00:00:00.000Z', exemption: true });
+  });
+
   it('requires report permission, and cost permission for cost metrics', async () => {
     expect((await report('mtbf', '', h.users.reporter)).status).toBe(403);
     expect((await report('maintenance_cost', '', h.users.sup)).status).toBe(403);

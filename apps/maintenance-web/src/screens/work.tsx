@@ -577,7 +577,13 @@ export function WorkOrders({ siteId, timezone }: { siteId: string; timezone: str
           </form>
           <div className="card">
             <h4>Timeline</h4>
-            <ul>{(selected.transitions ?? []).map((t: any, i: number) => <li key={i}>{t.action}: {t.from_state ?? '—'} → {t.to_state}</li>)}</ul>
+            <ul>{(selected.transitions ?? []).map((t: any, i: number) => (
+              <li key={i}>
+                {t.action}: {t.from_state ?? '—'} → {t.to_state}
+                {t.detail?.exemption ? ' · approved exemption' : ''}
+                {typeof t.detail?.due_at === 'string' ? ` · due ${t.detail.due_at}` : ''}
+              </li>
+            ))}</ul>
           </div>
         </Panel>
       )}

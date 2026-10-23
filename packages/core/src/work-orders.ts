@@ -405,6 +405,8 @@ export async function patchWorkOrder(s: Services, actor: Actor, id: string, expe
     if (next.planned_start && next.planned_end && next.planned_end < next.planned_start) throw invalid('planned_end must not precede planned_start');
     const material = state === 'ready' && fields.some((f) => (MATERIAL_FIELDS as readonly string[]).includes(f));
     const newState: WorkOrderState = material ? 'pending_approval' : state;
+    const dueFrom = iso(wo.due_at);
+    const dueTo = iso(next.due_at);
     const now = s.clock.now();
     const { rows } = await tx.query(
       `UPDATE maintenance.work_order SET title = $3, description = $4, priority = $5, team_id = $6, scope = $7, planned_start = $8,
@@ -428,7 +430,9 @@ export async function patchWorkOrder(s: Services, actor: Actor, id: string, expe
     if (fields.includes('assignee_id') && patch.assignee_id) {
       await enqueueEvent(tx, actor, { siteId: wo.site_id, type: 'maintenance.work_order.assigned', aggregateType: 'work_order', aggregateId: wo.id, aggregateVersion: updated.version, occurredAt: now, payload: { work_order_id: wo.id, assignee_id: patch.assignee_id, display_number: wo.display_number, title: updated.title } });
     }
-    await writeAudit(tx, actor, { siteId: wo.site_id, action: 'work_order.edited', targetType: 'work_order', targetId: wo.id, beforeVersion: wo.version, afterVersion: updated.version, detail: { fields, reapproval_required: material } });
+    const editDetail: Record<string, unknown> = { fields, reapproval_required: material };
+    if (fields.includes('due_at') && dueFrom !== dueTo) editDetail.due_at = { from: dueFrom, to: dueTo };
+    await writeAudit(tx, actor, { siteId: wo.site_id, action: 'work_order.edited', targetType: 'work_order', targetId: wo.id, beforeVersion: wo.version, afterVersion: updated.version, detail: editDetail });
     return workOrderDto(tx, actor, updated, now);
   });
 }
@@ -695,6 +699,8 @@ export async function transitionWorkOrder(s: Services, actor: Actor, id: string,
           break;
         case 'cancel':
           set.cancel_reason = reason;
+          detail.due_at = iso(wo.due_at);
+          detail.exemption = req.exemption === true;
           if (req.exemption) {
             if (!can(p, 'maintenance.work_order.approve', wo.site_id)) throw forbidden('An approved exemption requires an approver');
             set.cancel_exemption = true;
