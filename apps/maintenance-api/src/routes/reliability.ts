@@ -5,6 +5,7 @@ import {
   externalCostRequest,
   failureLinkRequest,
   isoTimestamp,
+  priority,
   restoreDowntimeRequest,
   uuid,
 } from '@vm/contracts';
@@ -30,7 +31,8 @@ import { parse } from '@vm/server-kit';
 import { z } from 'zod';
 import { API, param, type RouteDeps } from '../http.ts';
 
-const periodQuery = z.object({ site_id: uuid, from: isoTimestamp, to: isoTimestamp, asset_id: uuid.optional() });
+const backlogFilters = { priority: priority.optional(), team_id: uuid.optional() };
+const periodQuery = z.object({ site_id: uuid, from: isoTimestamp, to: isoTimestamp, asset_id: uuid.optional(), ...backlogFilters });
 const multiPeriodQuery = z.object({
   site_ids: z
     .union([z.string(), z.array(z.string())])
@@ -39,6 +41,7 @@ const multiPeriodQuery = z.object({
   from: isoTimestamp,
   to: isoTimestamp,
   asset_id: uuid.optional(),
+  ...backlogFilters,
 });
 
 const syncOperationsBody = z.object({

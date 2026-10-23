@@ -130,15 +130,21 @@ export function Downtime({ siteId }: { siteId: string }) {
 }
 
 export function Reports({ siteId }: { siteId: string }) {
+  const teams = useList<any>(`${M}/teams?site_id=${siteId}`);
   const [metric, setMetric] = useState('failure_count');
+  const [priority, setPriority] = useState('');
+  const [teamId, setTeamId] = useState('');
   const [data, setData] = useState<any>(null);
   const [err, setErr] = useState<unknown>(null);
   const run = async () => {
     setErr(null);
     const to = new Date();
     const from = new Date(to.getTime() - 90 * 86400000);
+    const params = new URLSearchParams({ site_id: siteId, from: from.toISOString(), to: to.toISOString() });
+    if (metric === 'overdue_backlog' && priority) params.set('priority', priority);
+    if (metric === 'overdue_backlog' && teamId) params.set('team_id', teamId);
     try {
-      setData(await api(`${M}/reports/${metric}?site_id=${siteId}&from=${from.toISOString()}&to=${to.toISOString()}`));
+      setData(await api(`${M}/reports/${metric}?${params.toString()}`));
     } catch (e) {
       setErr(e);
     }
@@ -165,6 +171,22 @@ export function Reports({ siteId }: { siteId: string }) {
               {['failure_count', 'mtbf', 'mttr', 'mtta', 'downtime', 'overdue_backlog', 'pm_compliance', 'repeat_faults', 'maintenance_cost'].map((m) => <option key={m}>{m}</option>)}
             </select>
           </label>
+          {metric === 'overdue_backlog' && (
+            <>
+              <label>Priority
+                <select value={priority} onChange={(e) => setPriority(e.target.value)}>
+                  <option value="">Any</option>
+                  {['critical', 'high', 'normal', 'low'].map((value) => <option key={value} value={value}>{value}</option>)}
+                </select>
+              </label>
+              <label>Team
+                <select value={teamId} onChange={(e) => setTeamId(e.target.value)}>
+                  <option value="">Any</option>
+                  {teams.items.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+                </select>
+              </label>
+            </>
+          )}
           <button type="button" onClick={() => void run()}>Run report</button>
         </div>
       </div>

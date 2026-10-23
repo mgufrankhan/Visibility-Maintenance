@@ -115,6 +115,47 @@ describe('KPI reconciliation (AC-11)', () => {
     expect(reasons).toEqual(expect.arrayContaining(['classified planned_stop', 'classified communication_loss', 'not validated']));
   });
 
+  it('filters the overdue backlog by priority, team and asset, and leaves closed work out', async () => {
+    const night = await h.call(h.users.admin, 'POST', `${M}/teams`, { site_id: h.siteA1, name: 'Night crew' });
+    expect(night.status, JSON.stringify(night.body)).toBe(201);
+    const draft = async (title: string, extra: Record<string, unknown>) => {
+      const created = await h.call(h.users.sup, 'POST', `${M}/work-orders`, {
+        site_id: h.siteA1,
+        asset_id: k1,
+        title,
+        priority: 'normal',
+        team_id: h.teamA1,
+        scope: 'Repair the fault',
+        due_at: '2026-10-01T00:00:00Z',
+        ...extra,
+      });
+      expect(created.status, JSON.stringify(created.body)).toBe(201);
+      return created.body.id as string;
+    };
+    const high = await draft('High overdue', { priority: 'high', asset_id: k1 });
+    const low = await draft('Low overdue', { priority: 'low', team_id: night.body.id, asset_id: k2 });
+    const cancelledId = await draft('Cancelled overdue', { priority: 'high' });
+    const cancelled = await h.call(h.users.sup, 'GET', `${M}/work-orders/${cancelledId}`);
+    expect((await h.call(h.users.sup, 'POST', `${M}/work-orders/${cancelledId}/transitions`, {
+      action: 'cancel', record_version: cancelled.body.version, reason: 'No longer required',
+    })).status).toBe(200);
+    await draft('Future due', { due_at: '2026-12-01T00:00:00Z', priority: 'high' });
+    const backlog = async (extra = '') => report('overdue_backlog', extra);
+    const all = await backlog();
+    expect(all.status).toBe(200);
+    const ids = all.body.items.map((item: { id: string }) => item.id);
+    expect(ids).toEqual(expect.arrayContaining([high, low]));
+    expect(ids).not.toContain(cancelledId);
+    expect(all.body.items.find((item: { id: string }) => item.id === high).age_hours).toBeGreaterThan(0);
+    const byPriority = await backlog('&priority=high&team_id=' + h.teamA1);
+    expect(byPriority.body.items.map((item: { id: string }) => item.id)).toEqual([high]);
+    const byTeam = await backlog('&team_id=' + night.body.id);
+    expect(byTeam.body.items.map((item: { id: string }) => item.id)).toEqual([low]);
+    const byAsset = await backlog('&asset_id=' + k2);
+    expect(byAsset.body.items.map((item: { id: string }) => item.id)).toEqual([low]);
+    expect((await report('mtbf', '&priority=high')).status).toBe(422);
+  });
+
   it('requires report permission, and cost permission for cost metrics', async () => {
     expect((await report('mtbf', '', h.users.reporter)).status).toBe(403);
     expect((await report('maintenance_cost', '', h.users.sup)).status).toBe(403);

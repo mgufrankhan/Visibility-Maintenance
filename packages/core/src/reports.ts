@@ -15,6 +15,8 @@ export interface ReportQuery {
   from: string;
   to: string;
   asset_id?: string;
+  priority?: 'critical' | 'high' | 'normal' | 'low';
+  team_id?: string;
 }
 
 export interface MultiSiteReportQuery {
@@ -22,6 +24,8 @@ export interface MultiSiteReportQuery {
   from: string;
   to: string;
   asset_id?: string;
+  priority?: 'critical' | 'high' | 'normal' | 'low';
+  team_id?: string;
 }
 
 interface Scope {
@@ -30,6 +34,8 @@ interface Scope {
   from: Date;
   to: Date;
   assetId: string | null;
+  priority: ReportQuery['priority'] | null;
+  teamId: string | null;
 }
 
 const QUALIFYING = `classification = 'unplanned_failure' AND validated`;
@@ -174,12 +180,15 @@ async function overdueBacklog(s: Services, sc: Scope) {
   const now = s.clock.now();
   const { rows } = await s.db.query(
     `SELECT id, display_number, title, priority, team_id, asset_id, due_at, state FROM maintenance.work_order
-      WHERE tenant_id = $1 AND site_id = $2 AND ($3::uuid IS NULL OR asset_id = $3) AND state = ANY($4::text[]) AND due_at < $5 ORDER BY due_at`,
-    [sc.tenantId, sc.siteId, sc.assetId, OPEN_STATES, now],
+      WHERE tenant_id = $1 AND site_id = $2 AND ($3::uuid IS NULL OR asset_id = $3)
+        AND ($4::text IS NULL OR priority = $4) AND ($5::uuid IS NULL OR team_id = $5)
+        AND state = ANY($6::text[]) AND due_at < $7 ORDER BY due_at`,
+    [sc.tenantId, sc.siteId, sc.assetId, sc.priority, sc.teamId, OPEN_STATES, now],
   );
   return {
     value: rows.length,
     as_of: now.toISOString(),
+    filters: { asset_id: sc.assetId, priority: sc.priority, team_id: sc.teamId },
     items: rows.map((r) => ({ ...r, due_at: iso(r.due_at), age_hours: Math.round(((now.getTime() - r.due_at.getTime()) / 3_600_000) * 10) / 10 })),
   };
 }
@@ -268,11 +277,22 @@ export async function runReport(s: Services, actor: Actor, metric: ReportMetric,
   const p = actor.principal;
   requirePermission(p, 'maintenance.report.view', q.site_id);
   if (metric === 'maintenance_cost') requirePermission(p, 'maintenance.cost.view', q.site_id);
+  if ((q.priority || q.team_id) && metric !== 'overdue_backlog') {
+    throw invalid('Priority and team filters apply to the overdue backlog', { metric: ['Use overdue_backlog'] });
+  }
   const from = new Date(q.from);
   const to = new Date(q.to);
   if (!(to > from)) throw invalid('The period end must follow its start', { to: ['Must be after from'] });
   if (to.getTime() - from.getTime() > 3 * 366 * 86_400_000) throw invalid('Reports cover at most three years', { to: ['Period too long'] });
-  const sc: Scope = { tenantId: p.tenantId, siteId: q.site_id, from, to, assetId: q.asset_id ?? null };
+  const sc: Scope = {
+    tenantId: p.tenantId,
+    siteId: q.site_id,
+    from,
+    to,
+    assetId: q.asset_id ?? null,
+    priority: q.priority ?? null,
+    teamId: q.team_id ?? null,
+  };
   const site = await siteInfo(s, actor, q.site_id);
   let data: Record<string, unknown>;
   switch (metric) {
